@@ -1,0 +1,37 @@
+{
+  "players": [
+    { "id": "1", "name": "BadGarota" },
+    { "id": "2", "name": "Colopinto" },
+    { "id": "3", "name": "Kezinha" },
+    { "id": "4", "name": "llGravell" },
+    { "id": "5", "name": "Malakai" },
+    { "id": "6", "name": "Marlboro" },
+    { "id": "7", "name": "Pexenea" },
+    { "id": "8", "name": "Vaagma" },
+    { "id": "9", "name": "x0PRESS0RX" }
+  ],
+  "boss_categories": [
+    "20-24",
+    "25-29",
+    "30-34",
+    "35-39",
+    "40-44",
+    "45-49",
+    "50-54",
+    "55-59",
+    "60-64"
+  ],
+  "items": [],
+  "bosses": [],
+  "sales": [],
+  "history": [],
+  "warehouseItems": [],
+  "siegeEvents": [],
+  "bossEvents": [],
+  "notifications": [],
+  "tributes": [],
+  "fines": [],
+  "lotteryHistory": [],
+  "clanLogoUrl": "https://storage.googleapis.com/multimodal-queries/queries/ais/2026-04-07/01-19-29/logo.png",
+  "adminEmail": "albertrodrigosp@gmail.com"
+}
