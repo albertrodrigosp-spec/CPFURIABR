@@ -1,0 +1,5 @@
+{
+  "name": "L2 CP Manager",
+  "description": "A management application for Lineage 2 Const Parties (CP), featuring loot tracking, financial division, and member management.",
+  "requestFramePermissions": []
+}
