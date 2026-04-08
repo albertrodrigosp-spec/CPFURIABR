@@ -1,0 +1,20 @@
+[
+  {
+    "id": "b1",
+    "name": "Queen Shyeed",
+    "level": 80,
+    "category": "60-64",
+    "location": "Stakato Nest",
+    "lastDeath": null,
+    "killedBy": null
+  },
+  {
+    "id": "b2",
+    "name": "Barakiel",
+    "level": 70,
+    "category": "60-64",
+    "location": "Valley of Saints",
+    "lastDeath": null,
+    "killedBy": null
+  }
+]

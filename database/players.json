@@ -1,0 +1,11 @@
+[
+  { "id": "1", "name": "BadGarota", "class": "Healer", "level": "76" },
+  { "id": "2", "name": "Colopinto", "class": "Tank", "level": "76" },
+  { "id": "3", "name": "Kezinha", "class": "Mage", "level": "76" },
+  { "id": "4", "name": "llGravell", "class": "Archer", "level": "76" },
+  { "id": "5", "name": "Malakai", "class": "Dagger", "level": "76" },
+  { "id": "6", "name": "Marlboro", "class": "Support", "level": "76" },
+  { "id": "7", "name": "Pexenea", "class": "Mage", "level": "76" },
+  { "id": "8", "name": "Vaagma", "class": "Support", "level": "76" },
+  { "id": "9", "name": "x0PRESS0RX", "class": "Warrior", "level": "76" }
+]

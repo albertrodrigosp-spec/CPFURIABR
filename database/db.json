@@ -1,0 +1,37 @@
+{
+  "players": [
+    { "id": "1", "name": "BadGarota", "class": "Healer", "level": "76" },
+    { "id": "2", "name": "Colopinto", "class": "Tank", "level": "76" },
+    { "id": "3", "name": "Kezinha", "class": "Mage", "level": "76" },
+    { "id": "4", "name": "llGravell", "class": "Archer", "level": "76" },
+    { "id": "5", "name": "Malakai", "class": "Dagger", "level": "76" },
+    { "id": "6", "name": "Marlboro", "class": "Support", "level": "76" },
+    { "id": "7", "name": "Pexenea", "class": "Mage", "level": "76" },
+    { "id": "8", "name": "Vaagma", "class": "Support", "level": "76" },
+    { "id": "9", "name": "x0PRESS0RX", "class": "Warrior", "level": "76" }
+  ],
+  "items": [
+    {
+      "id": "1",
+      "name": "Sword of Damascus",
+      "unitValue": 15000000,
+      "category": "Weapon"
+    }
+  ],
+  "bosses": [
+    {
+      "id": "b1",
+      "name": "Queen Shyeed",
+      "level": 80,
+      "category": "60-64",
+      "location": "Stakato Nest"
+    }
+  ],
+  "sales": [],
+  "history": [],
+  "warehouse": [],
+  "siegeEvents": [],
+  "bossEvents": [],
+  "tributes": [],
+  "fines": []
+}
