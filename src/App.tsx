@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   LayoutDashboard, 
   Package, 
@@ -35,12 +35,14 @@ import {
   Search,
   Castle,
   Volume2,
+  VolumeX,
   AlertTriangle,
   ArrowLeft,
-  Skull
+  Skull,
+  Save
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { CPState, Player, LootItem, CraftMaterial, Contribution, Sale, HistoryEntry, Item, LotteryDraw, WarehouseItem, Equipment, SiegeEvent, BossEvent, CPNotification, Fine, Tribute, Boss } from './types';
+import { CPState, Player, Character, LootItem, CraftMaterial, Contribution, Sale, HistoryEntry, Item, LotteryDraw, WarehouseItem, Equipment, SiegeEvent, BossEvent, CPNotification, Fine, Tribute, Boss } from './types';
 
 const DEFAULT_CLAN_LOGO = 'https://storage.googleapis.com/multimodal-queries/queries/ais/2026-04-07/01-19-29/logo.png';
 const STORAGE_KEY = 'l2-cp-manager-state';
@@ -308,24 +310,104 @@ export default function App() {
   const [newBossLevel, setNewBossLevel] = useState('');
   const [newBossLocation, setNewBossLocation] = useState('');
   const [currentTime, setCurrentTime] = useState(Date.now());
+  const [bossAlert, setBossAlert] = useState<{ name: string; id: string } | null>(null);
+  const [showTodayBosses, setShowTodayBosses] = useState(false);
+  const alertedBossesRef = useRef<Record<string, number>>({});
+  const [isSoundEnabled, setIsSoundEnabled] = useState(true);
+  const [isAudioBlocked, setIsAudioBlocked] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const playAlertSound = () => {
+    if (!isSoundEnabled) return;
+    if (!audioRef.current) {
+      audioRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+      audioRef.current.loop = true;
+    }
+    audioRef.current.currentTime = 0;
+    audioRef.current.play()
+      .then(() => setIsAudioBlocked(false))
+      .catch(e => {
+        console.warn("Audio play blocked by browser policy. Interaction required.", e);
+        setIsAudioBlocked(true);
+      });
+  };
+
+  const stopAlertSound = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+  };
+
+  // Boss Alert Logic - Runs when currentTime or bosses change
+  useEffect(() => {
+    state.bosses?.forEach(boss => {
+      if (boss.lastDeath) {
+        const isHighLevel = (boss.level || 0) >= 50;
+        const baseHours = isHighLevel ? 10 : 6;
+        const baseRespawnTime = boss.lastDeath + (baseHours * 60 * 60 * 1000);
+        const timeUntilBase = baseRespawnTime - currentTime;
+        const fiveMinutes = 5 * 60 * 1000;
+
+        // If within 5 minutes and not already alerted for this specific death
+        if (timeUntilBase > 0 && timeUntilBase <= fiveMinutes && alertedBossesRef.current[boss.id] !== boss.lastDeath) {
+          setBossAlert({ name: boss.name, id: boss.id });
+          alertedBossesRef.current[boss.id] = boss.lastDeath;
+          playAlertSound();
+        }
+      }
+    });
+  }, [currentTime, state.bosses]);
+
+  // Auto-unlock audio on first interaction
+  useEffect(() => {
+    const unlock = () => {
+      if (audioRef.current) {
+        audioRef.current.play().then(() => {
+          audioRef.current?.pause();
+          audioRef.current!.currentTime = 0;
+          setIsAudioBlocked(false);
+          window.removeEventListener('click', unlock);
+        }).catch(() => {});
+      } else {
+        const a = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+        a.volume = 0;
+        a.play().then(() => {
+          setIsAudioBlocked(false);
+          window.removeEventListener('click', unlock);
+        }).catch(() => {});
+      }
+    };
+    window.addEventListener('click', unlock);
+    return () => window.removeEventListener('click', unlock);
+  }, []);
   
   useEffect(() => {
     const timer = setInterval(() => {
       const now = Date.now();
       setCurrentTime(now);
       
-      // Auto-reset bosses after 8 hours
+      // Auto-reset bosses after window end
       setState(prev => {
-        const hasBossToReset = prev.bosses?.some(b => b.lastDeath && (now - b.lastDeath) > (8 * 60 * 60 * 1000));
+        const hasBossToReset = prev.bosses?.some(b => {
+          if (!b.lastDeath) return false;
+          const isHighLevel = (b.level || 0) >= 50;
+          const endHours = isHighLevel ? 11.5 : 7.5;
+          return (now - b.lastDeath) > (endHours * 60 * 60 * 1000);
+        });
+        
         if (!hasBossToReset) return prev;
         
         return {
           ...prev,
-          bosses: prev.bosses?.map(b => 
-            b.lastDeath && (now - b.lastDeath) > (8 * 60 * 60 * 1000)
+          bosses: prev.bosses?.map(b => {
+            if (!b.lastDeath) return b;
+            const isHighLevel = (b.level || 0) >= 50;
+            const endHours = isHighLevel ? 11.5 : 7.5;
+            return (now - b.lastDeath) > (endHours * 60 * 60 * 1000)
               ? { ...b, lastDeath: undefined }
-              : b
-          )
+              : b;
+          })
         };
       });
     }, 1000);
@@ -392,6 +474,7 @@ export default function App() {
   const [editingRecipeId, setEditingRecipeId] = useState<string | null>(null);
   const [recipeMaterialsDraft, setRecipeMaterialsDraft] = useState<{ name: string, quantity: string }[]>([]);
   const [viewingPlayerId, setViewingPlayerId] = useState<string | null>(null);
+  const [activeCharacterIndex, setActiveCharacterIndex] = useState(0);
   const [editingSlot, setEditingSlot] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [editGrade, setEditGrade] = useState<'D' | 'C' | 'B' | ''>('');
@@ -418,10 +501,27 @@ export default function App() {
 
   const categories = ['Material', 'Weapon', 'Armor', 'Recipes', 'Outro'];
 
+  const saveToServer = async (data: CPState) => {
+    try {
+      const response = await fetch('/api/db', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (!response.ok) throw new Error('Falha ao salvar no servidor');
+      console.log('Dados sincronizados com o servidor JSON');
+    } catch (error) {
+      console.error('Erro na sincronização:', error);
+    }
+  };
+
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
       setStorageError(null);
+      // Auto-save to server (debounced slightly via state updates)
+      const timeoutId = setTimeout(() => saveToServer(state), 2000);
+      return () => clearTimeout(timeoutId);
     } catch (error) {
       console.error("Error saving state to localStorage:", error);
       if (error instanceof Error && (error.name === 'QuotaExceededError' || error.message.includes('quota'))) {
@@ -1036,23 +1136,56 @@ export default function App() {
     }
   }, [state.currentUser, state.siegeEvents, hasShownLoginReminder]);
 
+  const updateCharacterSlot = (playerId: string, index: number, updates: Partial<Character>) => {
+    setState(prev => ({
+      ...prev,
+      players: prev.players.map(p => {
+        if (p.id === playerId) {
+          let characters = p.characters ? [...p.characters] : [];
+          
+          if (characters.length === 0) {
+            characters = [
+              {
+                id: generateId(),
+                class: p.class,
+                level: p.level,
+                notes: p.notes,
+                imageUrl: p.characterImageUrl,
+                equipment: p.equipment
+              },
+              { id: generateId() },
+              { id: generateId() },
+              { id: generateId() }
+            ];
+          }
+
+          while (characters.length < 4) {
+            characters.push({ id: generateId() });
+          }
+
+          characters[index] = {
+            ...characters[index],
+            ...updates
+          };
+
+          return { ...p, characters };
+        }
+        return p;
+      })
+    }));
+  };
+
   const updateCharacterImage = async (id: string, file: File) => {
     try {
       const base64 = await compressImage(file, 800, 800);
-      setState(prev => ({
-        ...prev,
-        players: prev.players.map(p => p.id === id ? { ...p, characterImageUrl: base64 } : p)
-      }));
+      updateCharacterSlot(id, activeCharacterIndex, { imageUrl: base64 });
     } catch (err) {
       console.error('Erro ao processar imagem do personagem:', err);
     }
   };
 
   const updatePlayerInfo = (id: string, field: string, value: string) => {
-    setState(prev => ({
-      ...prev,
-      players: prev.players.map(p => p.id === id ? { ...p, [field]: value } : p)
-    }));
+    updateCharacterSlot(id, activeCharacterIndex, { [field]: value });
   };
 
   const updateEquipment = (playerId: string, slot: string, name: string, grade: string) => {
@@ -1060,11 +1193,24 @@ export default function App() {
       ...prev,
       players: prev.players.map(p => {
         if (p.id === playerId) {
-          const newEquipment = { 
-            ...(p.equipment || {}), 
-            [slot]: { name, grade } 
+          let characters = p.characters ? [...p.characters] : [];
+          if (characters.length === 0) {
+            characters = [
+              { id: generateId(), class: p.class, level: p.level, notes: p.notes, imageUrl: p.characterImageUrl, equipment: p.equipment },
+              { id: generateId() }, { id: generateId() }, { id: generateId() }
+            ];
+          }
+          while (characters.length < 4) characters.push({ id: generateId() });
+
+          const currentEquipment = characters[activeCharacterIndex].equipment || {};
+          characters[activeCharacterIndex] = {
+            ...characters[activeCharacterIndex],
+            equipment: {
+              ...currentEquipment,
+              [slot]: { name, grade }
+            }
           };
-          return { ...p, equipment: newEquipment };
+          return { ...p, characters };
         }
         return p;
       })
@@ -3271,19 +3417,54 @@ export default function App() {
               animate={{ opacity: 1, y: 0 }}
               className="max-w-6xl mx-auto space-y-6"
             >
-              {viewingPlayerId ? (
+              {viewingPlayerId ? (() => {
+                const viewingPlayer = state.players.find(p => p.id === viewingPlayerId);
+                const activeChar = viewingPlayer ? (
+                  viewingPlayer.characters && viewingPlayer.characters[activeCharacterIndex] 
+                    ? viewingPlayer.characters[activeCharacterIndex]
+                    : (activeCharacterIndex === 0 ? {
+                        imageUrl: viewingPlayer.characterImageUrl,
+                        class: viewingPlayer.class,
+                        level: viewingPlayer.level,
+                        notes: viewingPlayer.notes,
+                        equipment: viewingPlayer.equipment
+                      } : {})
+                ) : null;
+
+                return (
                 <div className="space-y-6">
                   {/* Profile Header */}
                   <div className="flex items-center justify-between mb-4">
                     <button 
-                      onClick={() => setViewingPlayerId(null)}
+                      onClick={() => {
+                        setViewingPlayerId(null);
+                        setActiveCharacterIndex(0);
+                      }}
                       className="flex items-center gap-2 text-gray-400 hover:text-amber-500 transition-colors font-bold uppercase tracking-widest text-xs"
                     >
-                      <X size={16} />
+                      <ArrowLeft size={16} />
                       Voltar para Membros
                     </button>
-                    <div className="flex items-center gap-2 text-amber-500/50 text-[10px] font-bold uppercase tracking-[0.2em]">
-                      Ficha do Personagem
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-2">
+                        {[0, 1, 2, 3].map(idx => (
+                          <button
+                            key={idx}
+                            onClick={() => setActiveCharacterIndex(idx)}
+                            className={`w-8 h-8 rounded-lg font-bold text-xs transition-all border ${
+                              activeCharacterIndex === idx 
+                                ? 'bg-amber-500 border-amber-500 text-black shadow-[0_0_10px_rgba(245,158,11,0.3)]' 
+                                : 'bg-gray-800 border-gray-700 text-gray-500 hover:border-amber-500/50'
+                            }`}
+                          >
+                            {idx + 1}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="h-4 w-[1px] bg-gray-800"></div>
+                      <div className="flex items-center gap-2 text-amber-500/50 text-[10px] font-bold uppercase tracking-[0.2em]">
+                        Ficha {activeCharacterIndex + 1}
+                      </div>
                     </div>
                   </div>
 
@@ -3296,10 +3477,10 @@ export default function App() {
                         <div className="flex flex-col items-center">
                           <div className="relative group/char mb-6 w-full">
                             <div className="min-h-[300px] rounded-2xl bg-[#0b0e14] border-2 border-gray-800 overflow-hidden flex items-center justify-center shadow-2xl group-hover:border-amber-500/50 transition-all">
-                              {state.players.find(p => p.id === viewingPlayerId)?.characterImageUrl ? (
-                                state.players.find(p => p.id === viewingPlayerId)?.characterImageUrl?.startsWith('data:video') ? (
+                              {activeChar?.imageUrl ? (
+                                activeChar.imageUrl.startsWith('data:video') ? (
                                   <video 
-                                    src={state.players.find(p => p.id === viewingPlayerId)?.characterImageUrl} 
+                                    src={activeChar.imageUrl} 
                                     className="w-full h-auto"
                                     autoPlay
                                     loop
@@ -3308,7 +3489,7 @@ export default function App() {
                                   />
                                 ) : (
                                   <img 
-                                    src={state.players.find(p => p.id === viewingPlayerId)?.characterImageUrl} 
+                                    src={activeChar.imageUrl} 
                                     alt="Character" 
                                     className="w-full h-auto"
                                     referrerPolicy="no-referrer"
@@ -3319,12 +3500,28 @@ export default function App() {
                                   <Camera size={40} />
                                   <div className="text-center px-4">
                                     <span className="text-[10px] font-bold uppercase tracking-widest block">Adicionar Arte</span>
+                                    <span className="text-[8px] text-gray-700 mt-1 block">Slot {activeCharacterIndex + 1}</span>
                                   </div>
                                 </div>
                               )}
                             </div>
+                            
+                            {/* Navigation Arrows */}
+                            <button 
+                              onClick={() => setActiveCharacterIndex(prev => (prev - 1 + 4) % 4)}
+                              className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 bg-black/50 backdrop-blur-md rounded-full flex items-center justify-center text-white opacity-0 group-hover/char:opacity-100 transition-opacity hover:bg-amber-500 hover:text-black z-20"
+                            >
+                              <ArrowLeft size={16} />
+                            </button>
+                            <button 
+                              onClick={() => setActiveCharacterIndex(prev => (prev + 1) % 4)}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 bg-black/50 backdrop-blur-md rounded-full flex items-center justify-center text-white opacity-0 group-hover/char:opacity-100 transition-opacity hover:bg-amber-500 hover:text-black z-20"
+                            >
+                              <ArrowLeft size={16} className="rotate-180" />
+                            </button>
+
                             {isAdmin && (
-                              <label className="absolute top-2 right-2 w-8 h-8 bg-amber-500 rounded-full flex items-center justify-center opacity-0 group-hover/char:opacity-100 transition-opacity cursor-pointer shadow-lg border-2 border-[#151921] z-10">
+                              <label className="absolute top-2 right-2 w-8 h-8 bg-amber-500 rounded-full flex items-center justify-center opacity-0 group-hover/char:opacity-100 transition-opacity cursor-pointer shadow-lg border-2 border-[#151921] z-30">
                                 <Plus size={18} className="text-black" />
                                 <input 
                                   type="file" 
@@ -3340,7 +3537,7 @@ export default function App() {
                           </div>
 
                           <h2 className="text-3xl font-bold text-white mb-2">
-                            {state.players.find(p => p.id === viewingPlayerId)?.name}
+                            {viewingPlayer?.name}
                           </h2>
                           <div className="flex items-center gap-2 text-amber-500 font-bold text-[10px] uppercase tracking-[0.3em] bg-amber-500/10 px-4 py-1.5 rounded-full border border-amber-500/20">
                             <Shield size={12} />
@@ -3353,9 +3550,14 @@ export default function App() {
                     {/* Character Sheet */}
                     <div className="lg:col-span-2 space-y-6">
                       <section className="bg-[#151921] rounded-3xl p-8 border border-gray-800 shadow-xl h-full relative overflow-hidden">
-                        <div className="flex items-center gap-3 mb-8 text-amber-500">
-                          <ScrollText size={24} />
-                          <h2 className="text-xl font-bold uppercase tracking-widest">Ficha do Personagem</h2>
+                        <div className="flex items-center justify-between mb-8">
+                          <div className="flex items-center gap-3 text-amber-500">
+                            <ScrollText size={24} />
+                            <h2 className="text-xl font-bold uppercase tracking-widest">Ficha do Personagem</h2>
+                          </div>
+                          <div className="px-3 py-1 bg-gray-800 rounded-lg text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                            Slot {activeCharacterIndex + 1}
+                          </div>
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -3366,7 +3568,7 @@ export default function App() {
                                 <input 
                                   type="text" 
                                   placeholder="Classe"
-                                  value={state.players.find(p => p.id === viewingPlayerId)?.class || ''}
+                                  value={activeChar?.class || ''}
                                   onChange={(e) => viewingPlayerId && updatePlayerInfo(viewingPlayerId, 'class', e.target.value)}
                                   disabled={state.currentUser?.id !== viewingPlayerId}
                                   className="flex-1 bg-[#0b0e14] border border-gray-800 p-3 rounded-xl text-gray-200 text-sm focus:border-amber-500/50 outline-none disabled:opacity-50"
@@ -3374,7 +3576,7 @@ export default function App() {
                                 <input 
                                   type="text" 
                                   placeholder="Level"
-                                  value={state.players.find(p => p.id === viewingPlayerId)?.level || ''}
+                                  value={activeChar?.level || ''}
                                   onChange={(e) => viewingPlayerId && updatePlayerInfo(viewingPlayerId, 'level', e.target.value)}
                                   disabled={state.currentUser?.id !== viewingPlayerId}
                                   className="w-20 bg-[#0b0e14] border border-gray-800 p-3 rounded-xl text-gray-200 text-sm focus:border-amber-500/50 outline-none disabled:opacity-50"
@@ -3385,14 +3587,14 @@ export default function App() {
                             <div>
                               <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Equipamentos</label>
                               <div className="relative bg-[#0b0e14] border border-gray-800 rounded-2xl p-4 min-h-[500px] flex items-center justify-center overflow-hidden">
-                                {/* Equipment Grid Layout mimicking the image */}
+                                {/* Equipment Grid Layout */}
                                 <div className="relative w-full max-w-[280px] aspect-[3/5] grid grid-cols-3 gap-2">
                                   {/* Top Row */}
                                   <div className="w-full aspect-square"></div>
                                   <EquipmentSlot 
                                     slot="helmet" 
                                     label="Helmet" 
-                                    player={state.players.find(p => p.id === viewingPlayerId)}
+                                    player={activeChar as any}
                                     isOwner={state.currentUser?.id === viewingPlayerId}
                                     onEdit={(slot, val) => { setEditingSlot(slot); setEditValue(val.name); setEditGrade(val.grade as any); }}
                                   />
@@ -3403,7 +3605,7 @@ export default function App() {
                                   <EquipmentSlot 
                                     slot="armor" 
                                     label="Armor" 
-                                    player={state.players.find(p => p.id === viewingPlayerId)}
+                                    player={activeChar as any}
                                     isOwner={state.currentUser?.id === viewingPlayerId}
                                     onEdit={(slot, val) => { setEditingSlot(slot); setEditValue(val.name); setEditGrade(val.grade as any); }}
                                   />
@@ -3413,7 +3615,7 @@ export default function App() {
                                   <EquipmentSlot 
                                     slot="gloves" 
                                     label="Gloves" 
-                                    player={state.players.find(p => p.id === viewingPlayerId)}
+                                    player={activeChar as any}
                                     isOwner={state.currentUser?.id === viewingPlayerId}
                                     onEdit={(slot, val) => { setEditingSlot(slot); setEditValue(val.name); setEditGrade(val.grade as any); }}
                                     className="-translate-y-4"
@@ -3421,14 +3623,14 @@ export default function App() {
                                   <EquipmentSlot 
                                     slot="pants" 
                                     label="Pants" 
-                                    player={state.players.find(p => p.id === viewingPlayerId)}
+                                    player={activeChar as any}
                                     isOwner={state.currentUser?.id === viewingPlayerId}
                                     onEdit={(slot, val) => { setEditingSlot(slot); setEditValue(val.name); setEditGrade(val.grade as any); }}
                                   />
                                   <EquipmentSlot 
                                     slot="boots" 
                                     label="Boots" 
-                                    player={state.players.find(p => p.id === viewingPlayerId)}
+                                    player={activeChar as any}
                                     isOwner={state.currentUser?.id === viewingPlayerId}
                                     onEdit={(slot, val) => { setEditingSlot(slot); setEditValue(val.name); setEditGrade(val.grade as any); }}
                                     className="-translate-y-4"
@@ -3438,7 +3640,7 @@ export default function App() {
                                   <EquipmentSlot 
                                     slot="weapon" 
                                     label="Weapon" 
-                                    player={state.players.find(p => p.id === viewingPlayerId)}
+                                    player={activeChar as any}
                                     isOwner={state.currentUser?.id === viewingPlayerId}
                                     onEdit={(slot, val) => { setEditingSlot(slot); setEditValue(val.name); setEditGrade(val.grade as any); }}
                                   />
@@ -3448,7 +3650,7 @@ export default function App() {
                                   <EquipmentSlot 
                                     slot="shield" 
                                     label="Shield" 
-                                    player={state.players.find(p => p.id === viewingPlayerId)}
+                                    player={activeChar as any}
                                     isOwner={state.currentUser?.id === viewingPlayerId}
                                     onEdit={(slot, val) => { setEditingSlot(slot); setEditValue(val.name); setEditGrade(val.grade as any); }}
                                   />
@@ -3457,21 +3659,21 @@ export default function App() {
                                   <EquipmentSlot 
                                     slot="earring1" 
                                     label="Earring" 
-                                    player={state.players.find(p => p.id === viewingPlayerId)}
+                                    player={activeChar as any}
                                     isOwner={state.currentUser?.id === viewingPlayerId}
                                     onEdit={(slot, val) => { setEditingSlot(slot); setEditValue(val.name); setEditGrade(val.grade as any); }}
                                   />
                                   <EquipmentSlot 
                                     slot="necklace" 
                                     label="Necklace" 
-                                    player={state.players.find(p => p.id === viewingPlayerId)}
+                                    player={activeChar as any}
                                     isOwner={state.currentUser?.id === viewingPlayerId}
                                     onEdit={(slot, val) => { setEditingSlot(slot); setEditValue(val.name); setEditGrade(val.grade as any); }}
                                   />
                                   <EquipmentSlot 
                                     slot="earring2" 
                                     label="Earring" 
-                                    player={state.players.find(p => p.id === viewingPlayerId)}
+                                    player={activeChar as any}
                                     isOwner={state.currentUser?.id === viewingPlayerId}
                                     onEdit={(slot, val) => { setEditingSlot(slot); setEditValue(val.name); setEditGrade(val.grade as any); }}
                                   />
@@ -3480,7 +3682,7 @@ export default function App() {
                                   <EquipmentSlot 
                                     slot="ring1" 
                                     label="Ring" 
-                                    player={state.players.find(p => p.id === viewingPlayerId)}
+                                    player={activeChar as any}
                                     isOwner={state.currentUser?.id === viewingPlayerId}
                                     onEdit={(slot, val) => { setEditingSlot(slot); setEditValue(val.name); setEditGrade(val.grade as any); }}
                                   />
@@ -3488,7 +3690,7 @@ export default function App() {
                                   <EquipmentSlot 
                                     slot="ring2" 
                                     label="Ring" 
-                                    player={state.players.find(p => p.id === viewingPlayerId)}
+                                    player={activeChar as any}
                                     isOwner={state.currentUser?.id === viewingPlayerId}
                                     onEdit={(slot, val) => { setEditingSlot(slot); setEditValue(val.name); setEditGrade(val.grade as any); }}
                                   />
@@ -3579,7 +3781,7 @@ export default function App() {
                               <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2 block">Funções na CP</label>
                               <textarea 
                                 placeholder="Descreva suas funções na CP..."
-                                value={state.players.find(p => p.id === viewingPlayerId)?.notes || ''}
+                                value={activeChar?.notes || ''}
                                 onChange={(e) => viewingPlayerId && updatePlayerInfo(viewingPlayerId, 'notes', e.target.value)}
                                 disabled={state.currentUser?.id !== viewingPlayerId}
                                 className="w-full h-40 bg-[#0b0e14] border border-gray-800 p-4 rounded-xl text-gray-400 text-sm focus:border-amber-500/50 outline-none disabled:opacity-50 resize-none"
@@ -3595,7 +3797,7 @@ export default function App() {
                             </div>
                             <div>
                               <h4 className="text-xs font-bold text-amber-500 uppercase tracking-wider">Modo de Edição</h4>
-                              <p className="text-[10px] text-gray-400">Você pode editar sua classe, level, equipamentos e funções na CP.</p>
+                              <p className="text-[10px] text-gray-400">Você pode editar sua classe, level, equipamentos e funções na CP para este personagem.</p>
                             </div>
                           </div>
                         )}
@@ -3603,7 +3805,8 @@ export default function App() {
                     </div>
                   </div>
                 </div>
-              ) : (
+                );
+              })() : (
                 <section className="bg-[#151921] rounded-2xl p-8 border border-gray-800 shadow-xl">
                   <div className="flex items-center gap-3 mb-8 text-amber-500">
                     <Users size={24} />
@@ -3649,7 +3852,7 @@ export default function App() {
                             )}
                           </div>
                           <button 
-                            onClick={() => setViewingPlayerId(player.id)}
+                            onClick={() => { setViewingPlayerId(player.id); setActiveCharacterIndex(0); }}
                             className="text-lg font-medium text-gray-200 hover:text-amber-500 transition-colors text-left"
                           >
                             {player.name}
@@ -3900,6 +4103,37 @@ export default function App() {
                           }}
                         />
                       </label>
+                    </div>
+
+                    <button
+                      onClick={() => saveToServer(state)}
+                      className="w-full bg-amber-500 hover:bg-amber-600 text-black font-bold py-3 rounded-xl transition-all shadow-lg shadow-amber-500/10 active:scale-[0.98] flex items-center justify-center gap-2"
+                    >
+                      <Save size={18} />
+                      Sincronizar com Banco de Dados (.json)
+                    </button>
+
+                    <div className="mt-6 pt-6 border-t border-gray-800">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${isSoundEnabled ? 'bg-amber-500/20 text-amber-500' : 'bg-gray-800 text-gray-500'}`}>
+                            {isSoundEnabled ? <Volume2 size={20} /> : <VolumeX size={20} />}
+                          </div>
+                          <div>
+                            <div className="text-sm font-bold text-white uppercase tracking-widest">Alertas Sonoros</div>
+                            <div className="text-[10px] text-gray-500 font-bold uppercase tracking-tighter">Ativar/Desativar som de respawn</div>
+                          </div>
+                        </div>
+                        <button 
+                          onClick={() => {
+                            setIsSoundEnabled(!isSoundEnabled);
+                            if (isSoundEnabled) stopAlertSound();
+                          }}
+                          className={`w-14 h-7 rounded-full relative transition-all duration-300 ${isSoundEnabled ? 'bg-amber-500' : 'bg-gray-800'}`}
+                        >
+                          <div className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-all duration-300 ${isSoundEnabled ? 'left-8' : 'left-1'}`}></div>
+                        </button>
+                      </div>
                     </div>
 
                     <div className="mt-8 pt-8 border-t border-gray-800">
@@ -4754,37 +4988,156 @@ export default function App() {
                   </h2>
                   <p className="text-gray-500 font-medium">Controle de respawn e caçadas</p>
                 </div>
-                {(selectedBossCategory || selectedBossId) && (
-                  <button 
-                    onClick={() => {
-                      if (selectedBossId) setSelectedBossId(null);
-                      else setSelectedBossCategory(null);
-                    }}
-                    className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-xl transition-all text-sm font-bold"
-                  >
-                    <ArrowLeft size={16} />
-                    Voltar
-                  </button>
-                )}
+                <div className="flex gap-2">
+                  {isAudioBlocked && isSoundEnabled && (
+                    <button 
+                      onClick={() => {
+                        playAlertSound();
+                        setIsAudioBlocked(false);
+                      }}
+                      className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 border border-amber-500/50 rounded-xl text-amber-500 text-[10px] font-black uppercase animate-pulse hover:bg-amber-500 hover:text-black transition-all"
+                    >
+                      <VolumeX size={14} />
+                      Ativar Som de Alerta
+                    </button>
+                  )}
+                  {(selectedBossCategory || selectedBossId || showTodayBosses) && (
+                    <button 
+                      onClick={() => {
+                        if (selectedBossId) setSelectedBossId(null);
+                        else if (showTodayBosses) setShowTodayBosses(false);
+                        else setSelectedBossCategory(null);
+                      }}
+                      className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-xl transition-all text-sm font-bold"
+                    >
+                      <ArrowLeft size={16} />
+                      Voltar
+                    </button>
+                  )}
+                </div>
               </header>
 
-              {!selectedBossCategory ? (
+              {!selectedBossCategory && !showTodayBosses ? (
                 /* Category List */
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {BOSS_CATEGORIES.map(cat => (
-                    <button
-                      key={cat}
-                      onClick={() => setSelectedBossCategory(cat)}
-                      className="p-6 bg-[#151921] border border-gray-800 rounded-3xl hover:border-amber-500/50 hover:bg-amber-500/5 transition-all group text-left"
-                    >
-                      <h3 className="text-lg font-black text-white group-hover:text-amber-500 transition-colors">
-                        Chefes de nível {cat.replace('-', ' a ')}
-                      </h3>
-                      <p className="text-xs text-gray-500 mt-1">
-                        {state.bosses?.filter(b => b.category === cat).length || 0} Bosses registrados
-                      </p>
-                    </button>
-                  ))}
+                <div className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {BOSS_CATEGORIES.map(cat => (
+                      <button
+                        key={cat}
+                        onClick={() => setSelectedBossCategory(cat)}
+                        className="p-6 bg-[#151921] border border-gray-800 rounded-3xl hover:border-amber-500/50 hover:bg-amber-500/5 transition-all group text-left"
+                      >
+                        <h3 className="text-lg font-black text-white group-hover:text-amber-500 transition-colors">
+                          Chefes de nível {cat.replace('-', ' a ')}
+                        </h3>
+                        <p className="text-xs text-gray-500 mt-1">
+                          {state.bosses?.filter(b => b.category === cat).length || 0} Bosses registrados
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={() => setShowTodayBosses(true)}
+                    className="w-full p-6 bg-amber-500/5 border border-amber-500/20 rounded-3xl hover:border-amber-500/50 hover:bg-amber-500/10 transition-all group flex items-center justify-between"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 bg-amber-500/20 rounded-2xl flex items-center justify-center text-amber-500 group-hover:scale-110 transition-transform">
+                        <Calendar size={24} />
+                      </div>
+                      <div className="text-left">
+                        <h3 className="text-lg font-black text-white group-hover:text-amber-500 transition-colors uppercase tracking-tight">
+                          Bosses abatidos nas últimas 24h
+                        </h3>
+                        <p className="text-xs text-gray-500 font-bold uppercase tracking-widest">
+                          {state.bosses?.filter(b => {
+                            if (!b.lastDeath) return false;
+                            const twentyFourHoursAgo = Date.now() - (24 * 60 * 60 * 1000);
+                            return b.lastDeath >= twentyFourHoursAgo;
+                          }).length || 0} Registros recentes
+                        </p>
+                      </div>
+                    </div>
+                    <div className="p-3 bg-amber-500/10 rounded-xl text-amber-500 group-hover:translate-x-1 transition-transform">
+                      <ExternalLink size={20} />
+                    </div>
+                  </button>
+                </div>
+              ) : showTodayBosses && !selectedBossId ? (
+                /* Today's Bosses List */
+                <div className="space-y-6">
+                  <div className="bg-[#151921] rounded-3xl p-8 border border-gray-800 shadow-xl">
+                    <div className="flex items-center gap-4 mb-8">
+                      <div className="w-12 h-12 bg-amber-500/20 rounded-2xl flex items-center justify-center text-amber-500">
+                        <HistoryIcon size={24} />
+                      </div>
+                      <div>
+                        <h3 className="text-2xl font-black text-white uppercase tracking-tight">Abatidos (Últimas 24h)</h3>
+                        <p className="text-xs text-gray-500 font-bold uppercase tracking-widest">Ordenado por nível (menor para maior)</p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {state.bosses?.filter(b => {
+                        if (!b.lastDeath) return false;
+                        const twentyFourHoursAgo = Date.now() - (24 * 60 * 60 * 1000);
+                        return b.lastDeath >= twentyFourHoursAgo;
+                      })
+                      .sort((a, b) => (Number(a.level) || 0) - (Number(b.level) || 0))
+                      .map(boss => {
+                        const isHighLevel = (boss.level || 0) >= 50;
+                        const baseHours = isHighLevel ? 10 : 6;
+                        const windowStart = boss.lastDeath! + ((baseHours - 1.5) * 60 * 60 * 1000);
+                        const windowBase = boss.lastDeath! + (baseHours * 60 * 60 * 1000);
+                        const windowEnd = boss.lastDeath! + ((baseHours + 1.5) * 60 * 60 * 1000);
+
+                        return (
+                          <button 
+                            key={boss.id}
+                            onClick={() => {
+                              setSelectedBossId(boss.id);
+                              setSelectedBossCategory(boss.category || null);
+                            }}
+                            className="p-5 bg-gray-800/30 border border-gray-800 rounded-2xl flex items-center justify-between group hover:border-amber-500/50 hover:bg-amber-500/5 transition-all text-left"
+                          >
+                            <div className="flex-1">
+                              <div className="flex gap-1.5 mb-2">
+                                <div className={`w-2 h-2 rounded-full ${currentTime < windowStart ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)] animate-pulse' : 'bg-gray-800'}`} />
+                                <div className={`w-2 h-2 rounded-full ${currentTime < windowBase ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.6)] animate-pulse' : 'bg-gray-800'}`} />
+                                <div className={`w-2 h-2 rounded-full ${currentTime < windowEnd ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)] animate-pulse' : 'bg-gray-800'}`} />
+                              </div>
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="font-bold text-white group-hover:text-amber-500 transition-colors uppercase tracking-tight">{boss.name}</span>
+                                <span className="text-[10px] font-bold bg-gray-800 px-2 py-0.5 rounded text-gray-400">Lvl {boss.level}</span>
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <p className="text-[10px] text-gray-500 font-bold uppercase">
+                                  Morto às: <span className="text-gray-300">{new Date(boss.lastDeath!).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
+                                </p>
+                                {boss.location && (
+                                  <p className="text-[10px] text-amber-500/70 font-bold uppercase">{boss.location}</p>
+                                )}
+                              </div>
+                            </div>
+                            <div className="p-2 bg-gray-800 rounded-lg text-gray-500 group-hover:text-amber-500 transition-colors">
+                              <ExternalLink size={14} />
+                            </div>
+                          </button>
+                        );
+                      })}
+                      {(!state.bosses || state.bosses.filter(b => {
+                        if (!b.lastDeath) return false;
+                        const deathDate = new Date(b.lastDeath).toDateString();
+                        const today = new Date().toDateString();
+                        return deathDate === today;
+                      }).length === 0) && (
+                        <div className="col-span-full py-12 text-center bg-gray-800/10 rounded-3xl border border-dashed border-gray-800">
+                          <Skull size={48} className="mx-auto text-gray-800 mb-4" />
+                          <p className="text-gray-600 font-bold uppercase tracking-widest">Nenhuma morte registrada hoje.</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
               ) : !selectedBossId ? (
                 /* Boss List in Category */
@@ -4855,9 +5208,13 @@ export default function App() {
                             {boss.location && (
                               <p className="text-[10px] text-amber-500/70 font-medium mt-0.5">{boss.location}</p>
                             )}
-                            {boss.lastDeath && (
+                            {boss.lastDeath && (Date.now() - boss.lastDeath) <= (((boss.level || 0) >= 50 ? 11.5 : 7.5) * 60 * 60 * 1000) ? (
                               <p className="text-[10px] text-gray-500 mt-1">
                                 Última morte: {new Date(boss.lastDeath).toLocaleString('pt-BR')}
+                              </p>
+                            ) : (
+                              <p className="text-[10px] text-gray-500 mt-1 font-bold uppercase tracking-widest">
+                                Status: <span className="text-amber-500/50">SEM REGISTRO</span>
                               </p>
                             )}
                           </button>
@@ -4884,26 +5241,35 @@ export default function App() {
                   if (!boss) return null;
 
                   const deathTime = boss.lastDeath || 0;
-                  const window6h = deathTime + (6 * 60 * 60 * 1000);
-                  const window7h = deathTime + (7 * 60 * 60 * 1000);
-                  const window8h = deathTime + (8 * 60 * 60 * 1000);
+                  const isHighLevel = (boss.level || 0) >= 50;
+                  
+                  const baseHours = isHighLevel ? 10 : 6;
+                  const startHours = baseHours - 1.5;
+                  const endHours = baseHours + 1.5;
+
+                  const windowStart = deathTime + (startHours * 60 * 60 * 1000);
+                  const windowBase = deathTime + (baseHours * 60 * 60 * 1000);
+                  const windowEnd = deathTime + (endHours * 60 * 60 * 1000);
                   
                   let status = "Vivo";
                   let statusColor = "text-green-500";
                   let showPossibleAlert = false;
 
                   if (deathTime > 0) {
-                    if (currentTime < window6h) {
+                    if (currentTime < windowStart) {
                       status = "Morto";
                       statusColor = "text-red-500";
-                    } else if (currentTime <= window8h) {
+                    } else if (currentTime <= windowEnd) {
                       status = "Janela de Respawn";
                       statusColor = "text-amber-500";
                       showPossibleAlert = true;
                     } else {
-                      status = "Vivo";
-                      statusColor = "text-green-500";
+                      status = "SEM REGISTRO";
+                      statusColor = "text-gray-500";
                     }
+                  } else {
+                    status = "SEM REGISTRO";
+                    statusColor = "text-gray-500";
                   }
 
                   return (
@@ -4923,7 +5289,7 @@ export default function App() {
                             <div>
                               <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Status Atual</p>
                               <p className={`text-xl font-black uppercase ${statusColor}`}>{status}</p>
-                              {deathTime > 0 && (
+                              {deathTime > 0 && status !== "SEM REGISTRO" && (
                                 <div className="mt-2 text-[10px] text-gray-400 font-medium space-y-0.5">
                                   <p>Morto em: <span className="text-gray-200">{new Date(deathTime).toLocaleDateString('pt-BR')} às {new Date(deathTime).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span></p>
                                   <p>Registrado por: <span className="text-amber-500/80">{boss.killedBy || 'Sistema'}</span></p>
@@ -4931,28 +5297,28 @@ export default function App() {
                               )}
                             </div>
 
-                            {deathTime > 0 && (
+                            {deathTime > 0 && status !== "SEM REGISTRO" && (
                               <div className="space-y-4 pt-4 border-t border-gray-800">
                                 <div className="grid grid-cols-3 gap-2">
                                   <div className="flex flex-col items-center p-3 bg-green-500/5 rounded-xl border border-green-500/10">
-                                    <p className="text-[8px] font-bold text-green-500 uppercase tracking-widest mb-1">Janela 6h</p>
-                                    <p className="text-sm font-black text-white mb-1">{formatTargetTime(window6h)}</p>
+                                    <p className="text-[8px] font-bold text-green-500 uppercase tracking-widest mb-1">Início ({isHighLevel ? '8:30h' : '4:30h'})</p>
+                                    <p className="text-sm font-black text-white mb-1">{formatTargetTime(windowStart)}</p>
                                     <p className="text-xs font-mono font-bold text-green-500">
-                                      {formatTimeLeft(window6h - currentTime)}
+                                      {formatTimeLeft(windowStart - currentTime)}
                                     </p>
                                   </div>
                                   <div className="flex flex-col items-center p-3 bg-amber-500/5 rounded-xl border border-amber-500/10">
-                                    <p className="text-[8px] font-bold text-amber-500 uppercase tracking-widest mb-1">Janela 7h</p>
-                                    <p className="text-sm font-black text-white mb-1">{formatTargetTime(window7h)}</p>
+                                    <p className="text-[8px] font-bold text-amber-500 uppercase tracking-widest mb-1">Base ({isHighLevel ? '10h' : '6h'})</p>
+                                    <p className="text-sm font-black text-white mb-1">{formatTargetTime(windowBase)}</p>
                                     <p className="text-xs font-mono font-bold text-amber-500">
-                                      {formatTimeLeft(window7h - currentTime)}
+                                      {formatTimeLeft(windowBase - currentTime)}
                                     </p>
                                   </div>
                                   <div className="flex flex-col items-center p-3 bg-red-500/5 rounded-xl border border-red-500/10">
-                                    <p className="text-[8px] font-bold text-red-500 uppercase tracking-widest mb-1">Janela 8h</p>
-                                    <p className="text-sm font-black text-white mb-1">{formatTargetTime(window8h)}</p>
+                                    <p className="text-[8px] font-bold text-red-500 uppercase tracking-widest mb-1">Fim ({isHighLevel ? '11:30h' : '7:30h'})</p>
+                                    <p className="text-sm font-black text-white mb-1">{formatTargetTime(windowEnd)}</p>
                                     <p className="text-xs font-mono font-bold text-red-500">
-                                      {formatTimeLeft(window8h - currentTime)}
+                                      {formatTimeLeft(windowEnd - currentTime)}
                                     </p>
                                   </div>
                                 </div>
@@ -4966,7 +5332,7 @@ export default function App() {
                             )}
                           </div>
 
-                          {!boss.lastDeath && (
+                          {!boss.lastDeath || status === "SEM REGISTRO" ? (
                             <div className="space-y-4 mb-6 bg-gray-800/20 p-4 rounded-2xl border border-gray-800/50">
                               <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2">Informar Horário da Morte</p>
                               <div className="grid grid-cols-2 gap-3">
@@ -4990,7 +5356,7 @@ export default function App() {
                                 </div>
                               </div>
                             </div>
-                          )}
+                          ) : null}
 
                           <button 
                             onClick={() => {
@@ -5010,7 +5376,7 @@ export default function App() {
                             Registrar Morte
                           </button>
 
-                          {isAdmin && boss.lastDeath && (
+                          {isAdmin && boss.lastDeath && status !== "SEM REGISTRO" && (
                             <button 
                               onClick={() => resetBossStatus(boss.id)}
                               className="w-full mt-4 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white font-bold py-3 rounded-2xl transition-all border border-gray-700 uppercase text-[10px] tracking-widest"
@@ -5402,6 +5768,83 @@ export default function App() {
               <div className="mt-4 flex items-center gap-2 text-[10px] text-gray-500 font-bold uppercase tracking-widest">
                 <Volume2 size={12} />
                 {activeNotification.type === 'siege' ? 'Trombetas de guerra soando...' : 'Preparando para a caçada...'}
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Boss Respawn Alert Pop-up */}
+      <AnimatePresence>
+        {bossAlert && (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.9, x: 50 }}
+            animate={{ opacity: 1, scale: 1, x: 0 }}
+            exit={{ opacity: 0, scale: 0.9, x: 50 }}
+            className="fixed top-8 right-8 z-[110] w-full max-w-sm"
+          >
+            <div className="bg-[#1a1f29] border-2 border-green-500 rounded-3xl p-6 shadow-2xl shadow-green-500/20 overflow-hidden relative">
+              <div className="absolute top-0 left-0 w-full h-1 bg-green-500 animate-pulse"></div>
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-2xl bg-green-500 flex items-center justify-center text-black shrink-0 animate-bounce">
+                  <Skull size={24} />
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-lg font-black text-green-500 uppercase tracking-tighter leading-tight mb-1">
+                    BOSS EM BREVE!
+                  </h3>
+                  <p className="text-sm text-gray-300 font-medium mb-4">
+                    O boss <span className="text-white font-bold">{bossAlert.name}</span> entrará em janela base em menos de 5 minutos!
+                  </p>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => {
+                        setSelectedBossId(bossAlert.id);
+                        setActiveTab('Boss');
+                        setBossAlert(null);
+                        stopAlertSound();
+                      }}
+                      className="flex-1 bg-green-500 hover:bg-green-600 text-black font-bold py-2 rounded-xl text-xs uppercase transition-all"
+                    >
+                      VER DETALHES
+                    </button>
+                    <button 
+                      onClick={() => {
+                        setBossAlert(null);
+                        stopAlertSound();
+                      }}
+                      className="px-4 bg-gray-800 hover:bg-gray-700 text-gray-400 font-bold py-2 rounded-xl text-xs uppercase transition-all"
+                    >
+                      FECHAR
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-4 flex items-center justify-between border-t border-gray-800 pt-4">
+                <div className="flex items-center gap-2 text-[10px] text-gray-500 font-bold uppercase tracking-widest">
+                  <Volume2 size={12} className={isSoundEnabled ? "text-green-500 animate-pulse" : "text-gray-600"} />
+                  {isSoundEnabled ? 'Alerta Sonoro Ativo' : 'Som Desativado'}
+                </div>
+                <div className="flex gap-3">
+                  <button 
+                    onClick={() => {
+                      stopAlertSound();
+                    }}
+                    className="text-[10px] font-bold text-amber-500 hover:text-amber-400 uppercase tracking-widest flex items-center gap-1 transition-colors"
+                  >
+                    <VolumeX size={12} />
+                    PARAR SOM
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setIsSoundEnabled(!isSoundEnabled);
+                      if (isSoundEnabled) stopAlertSound();
+                    }}
+                    className="text-[10px] font-bold text-red-500 hover:text-red-400 uppercase tracking-widest flex items-center gap-1 transition-colors"
+                  >
+                    {isSoundEnabled ? 'DESLIGAR ALERTAS' : 'LIGAR ALERTAS'}
+                  </button>
+                </div>
               </div>
             </div>
           </motion.div>

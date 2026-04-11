@@ -20,6 +20,16 @@ export interface Equipment {
   ears?: EquipmentItem;
 }
 
+export interface Character {
+  id: string;
+  name?: string;
+  imageUrl?: string;
+  class?: string;
+  level?: string;
+  notes?: string;
+  equipment?: Equipment;
+}
+
 export interface Player {
   id: string;
   name: string;
@@ -29,6 +39,7 @@ export interface Player {
   level?: string;
   notes?: string;
   equipment?: Equipment;
+  characters?: Character[];
 }
 
 export interface LootItem {
