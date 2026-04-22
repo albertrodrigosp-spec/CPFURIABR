@@ -40,6 +40,8 @@ export interface Player {
   notes?: string;
   equipment?: Equipment;
   characters?: Character[];
+  password?: string;
+  dkpPoints?: number;
 }
 
 export interface LootItem {
@@ -137,6 +139,7 @@ export interface CPNotification {
   message: string;
   timestamp: number;
   readBy: string[];
+  isManual?: boolean;
 }
 
 export interface CPState {
@@ -162,6 +165,7 @@ export interface CPState {
   tributes?: Tribute[];
   fines?: Fine[];
   bosses?: Boss[];
+  dkpHistory?: DKPHistoryEntry[];
 }
 
 export interface Boss {
@@ -206,4 +210,14 @@ export interface LotteryDraw {
   winner: string;
   prize: string;
   timestamp: number;
+}
+
+export interface DKPHistoryEntry {
+  id: string;
+  playerId: string;
+  playerName: string;
+  amount: number;
+  reason: string;
+  timestamp: number;
+  createdBy: string;
 }

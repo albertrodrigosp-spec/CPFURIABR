@@ -39,10 +39,12 @@ import {
   AlertTriangle,
   ArrowLeft,
   Skull,
-  Save
+  Save,
+  BellOff,
+  Info
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { CPState, Player, Character, LootItem, CraftMaterial, Contribution, Sale, HistoryEntry, Item, LotteryDraw, WarehouseItem, Equipment, SiegeEvent, BossEvent, CPNotification, Fine, Tribute, Boss } from './types';
+import { CPState, Player, Character, LootItem, CraftMaterial, Contribution, Sale, HistoryEntry, Item, LotteryDraw, WarehouseItem, Equipment, SiegeEvent, BossEvent, CPNotification, Fine, Tribute, Boss, DKPHistoryEntry } from './types';
 
 const DEFAULT_CLAN_LOGO = 'https://storage.googleapis.com/multimodal-queries/queries/ais/2026-04-07/01-19-29/logo.png';
 const STORAGE_KEY = 'l2-cp-manager-state';
@@ -135,6 +137,7 @@ const INITIAL_STATE: CPState = {
   tributes: [],
   fines: [],
   bosses: [],
+  dkpHistory: [],
 };
 
 const BOSS_CATEGORIES = [
@@ -347,13 +350,24 @@ export default function App() {
         const baseHours = isHighLevel ? 10 : 6;
         const baseRespawnTime = boss.lastDeath + (baseHours * 60 * 60 * 1000);
         const timeUntilBase = baseRespawnTime - currentTime;
-        const fiveMinutes = 5 * 60 * 1000;
+        const threeMinutes = 3 * 60 * 1000;
 
-        // If within 5 minutes and not already alerted for this specific death
-        if (timeUntilBase > 0 && timeUntilBase <= fiveMinutes && alertedBossesRef.current[boss.id] !== boss.lastDeath) {
+        // If within 3 minutes and not already alerted for this specific death
+        if (timeUntilBase > 0 && timeUntilBase <= threeMinutes && alertedBossesRef.current[boss.id] !== boss.lastDeath) {
+          const bossNotification: CPNotification = {
+            id: generateId(),
+            type: 'boss',
+            message: `BOSS ALERTA: ${boss.name} nasce em 3 minutos!`,
+            timestamp: Date.now(),
+            readBy: []
+          };
           setBossAlert({ name: boss.name, id: boss.id });
           alertedBossesRef.current[boss.id] = boss.lastDeath;
           playAlertSound();
+          setState(prev => ({
+            ...prev,
+            notifications: [bossNotification, ...(prev.notifications || [])]
+          }));
         }
       }
     });
@@ -427,13 +441,26 @@ export default function App() {
 
   const [hasShownLoginReminder, setHasShownLoginReminder] = useState(false);
 
-  const isAdmin = state.currentUser?.name === 'Malakai';
+  const isAdmin = state.currentUser?.name?.toLowerCase().trim() === 'malakai';
+  const isDKPManager = isAdmin;
   
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     const player = state.players.find(p => p.name.toLowerCase() === loginName.trim().toLowerCase());
-    if (player && loginPass === '123456789') {
-      setState(prev => ({ ...prev, currentUser: player }));
+    const correctPassword = player?.password || '123456789';
+    if (player && loginPass === correctPassword) {
+      const loginNotification: CPNotification = {
+        id: generateId(),
+        type: 'info',
+        message: `MEMBRO ONLINE: ${player.name} acabou de entrar no sistema!`,
+        timestamp: Date.now(),
+        readBy: [player.id]
+      };
+      setState(prev => ({ 
+        ...prev, 
+        currentUser: player,
+        notifications: [loginNotification, ...(prev.notifications || [])]
+      }));
       setLoginError('');
       setAudioUnlocked(true); // Login is a user interaction, unlock audio
       setHasShownLoginReminder(false); // Reset reminder state for new login
@@ -473,11 +500,23 @@ export default function App() {
   // Recipe Editor state
   const [editingRecipeId, setEditingRecipeId] = useState<string | null>(null);
   const [recipeMaterialsDraft, setRecipeMaterialsDraft] = useState<{ name: string, quantity: string }[]>([]);
+
+  // DKP state
+  const [dkpAmount, setDkpAmount] = useState('');
+  const [dkpReason, setDkpReason] = useState('');
+  const [selectedDKPPlayerId, setSelectedDKPPlayerId] = useState('');
+  const [dkpSearch, setDkpSearch] = useState('');
+  const [dkpHistorySearch, setDkpHistorySearch] = useState('');
   const [viewingPlayerId, setViewingPlayerId] = useState<string | null>(null);
   const [activeCharacterIndex, setActiveCharacterIndex] = useState(0);
   const [editingSlot, setEditingSlot] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [editGrade, setEditGrade] = useState<'D' | 'C' | 'B' | ''>('');
+
+  // Profile state
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordMessage, setPasswordMessage] = useState<{ text: string, type: 'success' | 'error' } | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
 
   // Siege state
@@ -592,6 +631,7 @@ export default function App() {
 
   const removeLotteryDraw = (id: string) => {
     if (!isAdmin) return;
+    if (!window.confirm('Excluir este registro de sorteio?')) return;
     setState(prev => ({
       ...prev,
       lotteryHistory: (prev.lotteryHistory || []).filter(draw => draw.id !== id)
@@ -614,6 +654,8 @@ export default function App() {
   };
 
   const removeWarehouseItem = (id: string) => {
+    if (!isAdmin) return;
+    if (!window.confirm('Deseja remover este item do armazém?')) return;
     setState(prev => ({
       ...prev,
       warehouseItems: (prev.warehouseItems || []).filter(item => item.id !== id)
@@ -639,7 +681,8 @@ export default function App() {
       const base64 = await compressImage(file, 400, 400);
       setState(prev => ({
         ...prev,
-        players: prev.players.map(p => p.id === id ? { ...p, imageUrl: base64 } : p)
+        players: prev.players.map(p => p.id === id ? { ...p, imageUrl: base64 } : p),
+        currentUser: prev.currentUser?.id === id ? { ...prev.currentUser, imageUrl: base64 } : prev.currentUser
       }));
     } catch (err) {
       console.error('Erro ao processar imagem do player:', err);
@@ -768,7 +811,8 @@ export default function App() {
       type: 'siege',
       message: `NOVA SIEGE CONVOCADA: ${newEvent.castle.toUpperCase()}! Data: ${newEvent.date} às ${newEvent.time}`,
       timestamp: Date.now(),
-      readBy: []
+      readBy: [],
+      isManual: true
     };
 
     setState(prev => ({
@@ -886,6 +930,111 @@ export default function App() {
     setTributeForm({ playerName: '', amount: '', description: '' });
   };
 
+  const BASE_GP = 10; // Valor mínimo para o CÁLCULO do PR, evitando divisão por zero
+  const DECAY_RATE = 0.10; // 10% de decaimento semanal
+
+  const addDKP = (type: 'add' | 'sub') => {
+    if (!isAdmin) return;
+    if (!selectedDKPPlayerId) return alert('Selecione um membro.');
+    
+    const amount = parseInt(dkpAmount);
+    if (isNaN(amount) || amount <= 0) return alert('Quantidade inválida.');
+    if (!dkpReason.trim()) return alert('Motivo obrigatório.');
+
+    const player = state.players.find(p => p.id === selectedDKPPlayerId);
+    if (!player) return;
+
+    const pointsChange = type === 'add' ? amount : -amount;
+
+    setState(prev => ({
+      ...prev,
+      players: prev.players.map(p => 
+        p.id === selectedDKPPlayerId 
+          ? { ...p, dkpPoints: (p.dkpPoints || 0) + pointsChange } 
+          : p
+      ),
+      dkpHistory: [{
+        id: generateId(),
+        playerId: player.id,
+        playerName: player.name,
+        amount: pointsChange,
+        reason: dkpReason,
+        timestamp: Date.now(),
+        createdBy: 'Malakai',
+      }, ...(prev.dkpHistory || [])]
+    }));
+
+    setDkpAmount('');
+    setDkpReason('');
+    alert(`Saldo de ${player.name} atualizado!`);
+  };
+
+  const distributeLootGP = (playerId: string, itemName: string, gpCost: number) => {
+    if (!isAdmin) return;
+    const player = state.players.find(p => p.id === playerId);
+    if (!player) return;
+
+    setState(prev => ({
+      ...prev,
+      players: prev.players.map(p => 
+        p.id === playerId 
+          ? { ...p, dkpPoints: (p.dkpPoints || 0) - gpCost } 
+          : p
+      ),
+      dkpHistory: [{
+        id: generateId(),
+        playerId: player.id,
+        playerName: player.name,
+        amount: -gpCost,
+        reason: `LOOT: ${itemName}`,
+        timestamp: Date.now(),
+        createdBy: 'Malakai',
+      }, ...(prev.dkpHistory || [])]
+    }));
+    alert(`Loot registrado para ${player.name}. -${gpCost} DKP.`);
+  };
+
+  const applyDKPDecay = () => {
+    if (!isAdmin) return;
+    setState(prev => ({
+      ...prev,
+      players: prev.players.map(p => ({
+        ...p,
+        dkpPoints: Math.floor((p.dkpPoints || 0) * 0.90)
+      })),
+      dkpHistory: [{
+        id: generateId(),
+        playerId: 'system',
+        playerName: 'SISTEMA',
+        amount: 0,
+        reason: 'Decaimento de 10% aplicado',
+        timestamp: Date.now(),
+        createdBy: 'Malakai',
+      }, ...(prev.dkpHistory || [])]
+    }));
+    alert('Decaimento de 10% aplicado a todos.');
+  };
+
+  const handleBulkDKP = (amount: number, reason: string) => {
+    if (!isAdmin) return;
+    const newEntries = state.players.map(p => ({
+      id: generateId(),
+      playerId: p.id,
+      playerName: p.name,
+      amount: amount,
+      reason: reason,
+      timestamp: Date.now(),
+      createdBy: 'Malakai',
+    }));
+
+    setState(prev => ({
+      ...prev,
+      players: prev.players.map(p => ({ ...p, dkpPoints: (p.dkpPoints || 0) + amount })),
+      dkpHistory: [...newEntries, ...(prev.dkpHistory || [])]
+    }));
+    alert(`Bônus de ${amount} DKP aplicado a todos!`);
+  };
+
   const payTribute = (tributeId: string) => {
     setState(prev => ({
       ...prev,
@@ -916,6 +1065,139 @@ export default function App() {
       fines: [newFine, ...(prev.fines || [])]
     }));
     setFineForm({ playerName: '', amount: '150000', reason: '' });
+  };
+
+  const awardEventEP = (eventId: string, type: 'siege' | 'boss', amount: number = 50) => {
+    if (!isAdmin) return;
+    
+    const event = type === 'siege' 
+      ? state.siegeEvents?.find(e => e.id === eventId)
+      : (state.bossEvents || []).find(e => e.id === eventId);
+      
+    if (!event) return;
+    
+    const attendees = Object.keys(event.attendance);
+    if (attendees.length === 0) {
+      alert('Nenhum membro confirmou presença neste evento.');
+      return;
+    }
+
+    const name = type === 'siege' ? (event as SiegeEvent).castle : (event as BossEvent).bossName;
+    const eventName = type === 'siege' ? `Siege ${name}` : `Hunt ${name}`;
+    
+    const newHistoryEntries: DKPHistoryEntry[] = attendees.map(pid => {
+      const player = state.players.find(p => p.id === pid);
+      return {
+        id: generateId(),
+        playerId: pid,
+        playerName: player?.name || 'Membro',
+        amount: amount,
+        reason: `Presença: ${eventName}`,
+        timestamp: Date.now(),
+        createdBy: 'Malakai',
+      };
+    });
+
+    setState(prev => ({
+      ...prev,
+      players: prev.players.map(p => {
+        if (attendees.includes(p.id)) {
+          return { ...p, dkpPoints: (p.dkpPoints || 0) + amount };
+        }
+        return p;
+      }),
+      dkpHistory: [...newHistoryEntries, ...(prev.dkpHistory || [])]
+    }));
+
+    alert(`DKP atribuído para ${attendees.length} membros!`);
+  };
+
+  const deleteDKPEntry = (entryId: string) => {
+    if (!isAdmin) return alert('Acesso Negado.');
+    
+    const entry = state.dkpHistory?.find(e => e.id === entryId);
+    if (!entry) return;
+
+    if (!window.confirm('Excluir este registro e reverter os pontos?')) return;
+
+    setState(prev => {
+      const h = prev.dkpHistory || [];
+      const target = h.find(e => e.id === entryId);
+      if (!target) return prev;
+
+      return {
+        ...prev,
+        players: prev.players.map(p => 
+          p.id === target.playerId 
+            ? { ...p, dkpPoints: (p.dkpPoints || 0) - target.amount } 
+            : p
+        ),
+        dkpHistory: h.filter(e => e.id !== entryId)
+      };
+    });
+  };
+
+  const clearDKPHistory = () => {
+    if (!isAdmin) {
+      alert('Acesso Negado.');
+      return;
+    }
+    if (!window.confirm('CUIDADO: Deseja apagar TODO o histórico de DKP?')) return;
+    setState(prev => ({ ...prev, dkpHistory: [] }));
+  };
+
+  const clearCraftHistory = () => {
+    if (!isAdmin) return;
+    if (!window.confirm('Deseja apagar TODO o histórico de Crafts e Vendas?')) return;
+    setState(prev => ({ ...prev, history: [], sales: [] }));
+  };
+
+  const clearFinesHistory = () => {
+    if (!isAdmin) return;
+    if (!window.confirm('Deseja apagar TODO o histórico de multas?')) return;
+    setState(prev => ({ ...prev, fines: [] }));
+  };
+
+  const clearTributesHistory = () => {
+    if (!isAdmin) return;
+    if (!window.confirm('Deseja apagar TODO o histórico de tributos?')) return;
+    setState(prev => ({ ...prev, tributes: [] }));
+  };
+
+  const clearLotteryHistory = () => {
+    if (!isAdmin) return;
+    if (!window.confirm('Deseja apagar TODO o histórico de sorteios?')) return;
+    setState(prev => ({ ...prev, lotteryHistory: [] }));
+  };
+
+  const clearNotifications = () => {
+    if (!isAdmin) return;
+    if (!window.confirm('Deseja apagar TODAS as notificações?')) return;
+    setState(prev => ({ ...prev, notifications: [] }));
+  };
+
+  const clearLoot = () => {
+    if (!isAdmin) return;
+    if (!window.confirm('Deseja apagar TODO o Loot pendente?')) return;
+    setState(prev => ({ ...prev, loot: [] }));
+  };
+
+  const clearBossHistory = () => {
+    if (!isAdmin) return;
+    if (!window.confirm('Deseja apagar TODAS as hunts agendadas?')) return;
+    setState(prev => ({ ...prev, bossEvents: [] }));
+  };
+
+  const clearSiegeHistory = () => {
+    if (!isAdmin) return;
+    if (!window.confirm('Deseja apagar TODAS as sieges agendadas?')) return;
+    setState(prev => ({ ...prev, siegeEvents: [] }));
+  };
+
+  const clearWarehouse = () => {
+    if (!isAdmin) return;
+    if (!window.confirm('Deseja apagar TODO o Clan Warehouse? ESTA AÇÃO É IRREVERSÍVEL.')) return;
+    setState(prev => ({ ...prev, warehouseItems: [] }));
   };
 
   const deleteSiegeEvent = (eventId: string) => {
@@ -970,12 +1252,25 @@ export default function App() {
   const markBossDead = (id: string, timestamp?: number) => {
     const timeToSet = timestamp || Date.now();
     const userName = state.currentUser?.name || 'Sistema';
-    setState(prev => ({
-      ...prev,
-      bosses: (prev.bosses || []).map(b => 
-        b.id === id ? { ...b, lastDeath: timeToSet, killedBy: userName } : b
-      )
-    }));
+    const boss = state.bosses?.find(b => b.id === id);
+    
+    if (boss) {
+      const deathNotification: CPNotification = {
+        id: generateId(),
+        type: 'boss',
+        message: `BOSS ABATIDO: ${boss.name} foi morto por ${userName}!`,
+        timestamp: Date.now(),
+        readBy: []
+      };
+
+      setState(prev => ({
+        ...prev,
+        bosses: (prev.bosses || []).map(b => 
+          b.id === id ? { ...b, lastDeath: timeToSet, killedBy: userName } : b
+        ),
+        notifications: [deathNotification, ...(prev.notifications || [])]
+      }));
+    }
   };
 
   const resetBossStatus = (id: string) => {
@@ -1006,7 +1301,8 @@ export default function App() {
       type: 'boss',
       message: `NOVA HUNT DE BOSS: ${newEvent.bossName.toUpperCase()}! Data: ${newEvent.date} às ${newEvent.time}`,
       timestamp: Date.now(),
-      readBy: []
+      readBy: [],
+      isManual: true
     };
 
     setState(prev => ({
@@ -1094,7 +1390,8 @@ export default function App() {
 
     // Only process the first one and wait for it to be cleared/read
     // This prevents infinite loops when multiple notifications exist
-    const nextNotification = unreadNotifications[0];
+    // Only show pop-up for manual convocations (isManual)
+    const nextNotification = unreadNotifications.find(n => n.isManual);
 
     if (nextNotification && nextNotification.id !== lastNotificationId) {
       setActiveNotification(nextNotification);
@@ -1217,6 +1514,29 @@ export default function App() {
     }));
   };
 
+  const changePassword = () => {
+    if (!state.currentUser) return;
+    if (newPassword.length < 6) {
+      setPasswordMessage({ text: 'A senha deve ter pelo menos 6 caracteres.', type: 'error' });
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordMessage({ text: 'As senhas não coincidem.', type: 'error' });
+      return;
+    }
+
+    setState(prev => ({
+      ...prev,
+      players: prev.players.map(p => p.id === state.currentUser?.id ? { ...p, password: newPassword } : p),
+      currentUser: prev.currentUser ? { ...prev.currentUser, password: newPassword } : null
+    }));
+
+    setPasswordMessage({ text: 'Senha alterada com sucesso!', type: 'success' });
+    setNewPassword('');
+    setConfirmPassword('');
+    setTimeout(() => setPasswordMessage(null), 3000);
+  };
+
   const addLoot = () => {
     if (!newItemName.trim() || !newItemPrice) return;
     const newItem: LootItem = {
@@ -1230,6 +1550,8 @@ export default function App() {
   };
 
   const removeLoot = (id: string) => {
+    if (!isAdmin) return;
+    if (!window.confirm('Remover este item do loot?')) return;
     setState(prev => ({ ...prev, loot: prev.loot.filter(i => i.id !== id) }));
   };
 
@@ -1326,6 +1648,8 @@ export default function App() {
   };
 
   const removeCraft = (id: string) => {
+    if (!isAdmin) return;
+    if (!window.confirm('Remover este material?')) return;
     setState(prev => ({ ...prev, craft: prev.craft.filter(m => m.id !== id) }));
   };
 
@@ -1463,9 +1787,14 @@ export default function App() {
   };
 
   const deleteHistoryEntry = (id: string) => {
+    if (!isAdmin) return;
+    
+    if (!window.confirm('Deseja excluir este registro do histórico permanentemente?')) return;
+
     setState(prev => ({
       ...prev,
-      history: prev.history.filter(entry => entry.id !== id)
+      history: (prev.history || []).filter(entry => entry.id !== id),
+      sales: (prev.sales || []).filter(sale => sale.id !== id)
     }));
   };
 
@@ -1709,6 +2038,8 @@ export default function App() {
   };
 
   const removeSale = (id: string) => {
+    if (!isAdmin) return;
+    if (!window.confirm('Excluir esta venda permanentemente?')) return;
     setState(prev => ({ ...prev, sales: prev.sales.filter(s => s.id !== id) }));
   };
 
@@ -1725,6 +2056,8 @@ export default function App() {
   };
 
   const removeItem = (id: string) => {
+    if (!isAdmin) return;
+    if (!window.confirm('Excluir este item permanentemente?')) return;
     setState(prev => ({ ...prev, items: prev.items.filter(i => i.id !== id) }));
   };
 
@@ -2044,6 +2377,8 @@ export default function App() {
     { name: 'Loteria Furia', icon: Clover },
     { name: 'Cla Warehouse', icon: Archive },
     { name: 'Membros', icon: Users },
+    { name: 'DKP', icon: Trophy },
+    { name: 'Meu Perfil', icon: User },
     { name: 'Notificações', icon: Bell, badge: state.notifications?.filter(n => !n.readBy.includes(state.currentUser?.id || '')).length || 0 },
     { name: 'Admin', icon: Settings, adminOnly: true },
   ];
@@ -2189,9 +2524,20 @@ export default function App() {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Loot Section */}
                 <section className="lg:col-span-1 bg-[#151921] rounded-2xl p-6 border border-gray-800 shadow-xl">
-                  <div className="flex items-center gap-2 mb-6 text-amber-500">
-                    <Package size={20} />
-                    <h2 className="text-lg font-bold uppercase tracking-wider">Loot</h2>
+                  <div className="flex items-center gap-2 mb-6 text-amber-500 justify-between">
+                    <div className="flex items-center gap-2">
+                      <Package size={20} />
+                      <h2 className="text-lg font-bold uppercase tracking-wider">Loot</h2>
+                    </div>
+                    {isAdmin && state.loot.length > 0 && (
+                      <button 
+                        onClick={clearLoot}
+                        className="text-[10px] font-bold text-red-500 hover:text-red-400 uppercase tracking-widest transition-colors flex items-center gap-1"
+                      >
+                        <Trash2 size={12} />
+                        Limpar
+                      </button>
+                    )}
                   </div>
                   
                   <div className="space-y-4 mb-6">
@@ -2766,6 +3112,20 @@ export default function App() {
                   <h1 className="text-3xl font-bold text-white tracking-tight">Vendas Não Apanhadas</h1>
                   <p className="text-gray-400 mt-1">Gerencie os itens prontos para venda e seus responsáveis.</p>
                 </div>
+                {isAdmin && state.sales.length > 0 && (
+                  <button 
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      clearCraftHistory();
+                    }}
+                    className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl transition-all font-black text-xs uppercase flex items-center gap-2 shadow-lg shadow-red-500/20 cursor-pointer active:scale-95"
+                  >
+                    <Trash2 size={16} className="pointer-events-none" />
+                    Limpar Histórico
+                  </button>
+                )}
               </div>
 
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
@@ -3245,6 +3605,20 @@ export default function App() {
                   <h1 className="text-3xl font-bold text-white tracking-tight">Histórico de Crafts</h1>
                   <p className="text-gray-400 mt-1">Relatório detalhado de todos os itens criados com sucesso.</p>
                 </div>
+                {isAdmin && state.history.length > 0 && (
+                  <button 
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      clearCraftHistory();
+                    }}
+                    className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl transition-all font-black text-xs uppercase flex items-center gap-2 shadow-lg shadow-red-500/20 cursor-pointer active:scale-95"
+                  >
+                    <Trash2 size={16} className="pointer-events-none" />
+                    Limpar Histórico
+                  </button>
+                )}
               </div>
 
               <div className="space-y-4">
@@ -3320,7 +3694,7 @@ export default function App() {
                         {isAdmin && (
                           <button 
                             onClick={() => deleteHistoryEntry(entry.id)}
-                            className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all bg-gray-800/50 border border-gray-700 hover:border-red-500/30 shadow-lg"
+                            className="p-2 bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20 rounded-xl transition-all shadow-lg"
                             title="Excluir registro"
                           >
                             <Trash2 size={20} />
@@ -3900,6 +4274,542 @@ export default function App() {
             </motion.div>
           )}
 
+              {activeTab === 'DKP' && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="max-w-6xl mx-auto space-y-8"
+                >
+              <div className="flex items-center justify-between">
+                <div>
+                  <h1 className="text-3xl font-bold text-white tracking-tight">Dragon Kill Points (DKP)</h1>
+                  <p className="text-gray-400 mt-1">Sistema de pontos por participação e loot</p>
+                </div>
+                <div className="flex items-center gap-4">
+                  {isAdmin && (
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-500 text-[10px] font-bold uppercase tracking-widest">
+                      <ShieldCheck size={14} />
+                      Master Admin: Malakai
+                    </div>
+                  )}
+                  {isAdmin && (
+                    <button 
+                      onClick={() => {
+                        if(confirm('Aplicar decaimento de 10% de todos os pontos de DKP?')) {
+                          applyDKPDecay();
+                        }
+                      }}
+                      className="px-4 py-2 bg-red-500/10 border border-red-500/20 rounded-xl text-red-500 text-xs font-bold uppercase tracking-widest hover:bg-red-500/20 transition-all flex items-center gap-2"
+                    >
+                      <RefreshCw size={14} />
+                      Decay Semanal
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div className="lg:col-span-2 space-y-6">
+                  <section className="bg-[#151921] rounded-3xl border border-gray-800 shadow-xl overflow-hidden">
+                    <div className="p-6 border-b border-gray-800 bg-gray-800/20 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <h3 className="text-sm font-bold text-white uppercase tracking-widest flex items-center gap-2">
+                        <Trophy size={18} className="text-amber-500" />
+                        Ranking de DKP
+                      </h3>
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={14} />
+                        <input 
+                          type="text"
+                          value={dkpSearch}
+                          onChange={(e) => setDkpSearch(e.target.value)}
+                          placeholder="Buscar membro..."
+                          className="bg-[#0b0e14] border border-gray-700 rounded-full pl-9 pr-4 py-1.5 text-xs text-gray-300 focus:outline-none focus:border-amber-500 transition-all w-full md:w-64"
+                        />
+                      </div>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-[#0b0e14] text-[10px] text-gray-500 uppercase tracking-widest font-bold border-b border-gray-800">
+                            <th className="px-6 py-4">Membro</th>
+                            <th className="px-6 py-4 text-right">Saldo DKP</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-800">
+                          {[...state.players]
+                            .filter(p => p.name.toLowerCase().includes(dkpSearch.toLowerCase()))
+                            .sort((a, b) => (b.dkpPoints || 0) - (a.dkpPoints || 0))
+                            .map((player, index) => {
+                            const displayRank = index + 1;
+
+                            return (
+                              <tr key={player.id} className="hover:bg-amber-500/5 transition-colors group">
+                                <td className="px-6 py-4">
+                                  <div className="flex items-center gap-3">
+                                    <div className="text-xs font-mono text-gray-600 w-4">#{displayRank}</div>
+                                    <div className="relative">
+                                      <div className="w-8 h-8 rounded-lg bg-[#0b0e14] border border-gray-700 overflow-hidden flex items-center justify-center text-xs font-black text-amber-500">
+                                        {player.imageUrl ? (
+                                          <img src={player.imageUrl} alt={player.name} className="w-full h-full object-cover" />
+                                        ) : player.name.substring(0, 2).toUpperCase()}
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <div className="text-sm font-bold text-gray-200">{player.name}</div>
+                                      <div className="text-[10px] text-gray-500">{player.class || 'Membro'}</div>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="px-6 py-4 text-right">
+                                  <span className={`text-sm font-black ${(player.dkpPoints || 0) >= 0 ? 'text-amber-500' : 'text-red-500'}`}>
+                                    {(player.dkpPoints || 0).toLocaleString()} DKP
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+
+                  <section className="bg-[#151921] rounded-3xl border border-gray-800 shadow-xl overflow-hidden">
+                    <div className="p-6 border-b border-gray-800 bg-gray-800/20 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-sm font-bold text-white uppercase tracking-widest flex items-center gap-2">
+                          <HistoryIcon size={18} className="text-amber-500" />
+                          Histórico Local
+                        </h3>
+                        {isAdmin && state.dkpHistory && state.dkpHistory.length > 0 && (
+                          <button 
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              clearDKPHistory();
+                            }}
+                            className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl transition-all font-black text-[10px] uppercase flex items-center gap-2 shadow-lg shadow-red-500/20 cursor-pointer active:scale-95"
+                            title="Limpar Todo o Histórico de DKP"
+                          >
+                            <Trash2 size={12} className="pointer-events-none" />
+                            Limpar Histórico
+                          </button>
+                        )}
+                      </div>
+                      
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={12} />
+                        <input 
+                          type="text"
+                          value={dkpHistorySearch}
+                          onChange={(e) => setDkpHistorySearch(e.target.value)}
+                          placeholder="Filtrar histórico por membro ou motivo..."
+                          className="w-full bg-[#0b0e14] border border-gray-700 rounded-xl pl-9 pr-4 py-2 text-[10px] text-gray-400 focus:outline-none focus:border-amber-500/50 transition-all"
+                        />
+                      </div>
+                    </div>
+                    
+                    <div className="divide-y divide-gray-800 max-h-[400px] overflow-y-auto custom-scrollbar">
+                      {(!state.dkpHistory || state.dkpHistory.length === 0) ? (
+                        <div className="p-10 text-center text-gray-600 italic text-xs">Sem registros de DKP.</div>
+                      ) : (
+                        state.dkpHistory
+                          .filter(entry => 
+                            entry.playerName.toLowerCase().includes(dkpHistorySearch.toLowerCase()) ||
+                            entry.reason.toLowerCase().includes(dkpHistorySearch.toLowerCase())
+                          )
+                          .map((entry) => (
+                          <div key={entry.id} className="p-4 flex items-center justify-between hover:bg-gray-800/40 transition-colors group">
+                            <div className="flex items-center gap-4">
+                              <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${entry.amount >= 0 ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}`}>
+                                {entry.amount >= 0 ? <Plus size={14} /> : <Trash2 size={14} />}
+                              </div>
+                              <div>
+                                <div className="text-sm font-bold text-gray-200">
+                                  {entry.playerName} <span className={entry.amount >= 0 ? 'text-green-500' : 'text-red-500'}>{entry.amount > 0 ? '+' : ''}{entry.amount} DKP</span>
+                                </div>
+                                <div className="text-[10px] text-gray-500 uppercase font-black tracking-widest">
+                                  {entry.reason} • {new Date(entry.timestamp).toLocaleDateString()}
+                                </div>
+                              </div>
+                            </div>
+                            {isAdmin && (
+                              <button 
+                                type="button"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  deleteDKPEntry(entry.id);
+                                }}
+                                className="relative z-50 p-3 bg-red-600 hover:bg-red-700 text-white rounded-xl shadow-xl flex items-center justify-center cursor-pointer transition-transform active:scale-90"
+                              >
+                                <Trash2 size={16} className="pointer-events-none" />
+                              </button>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </section>
+                </div>
+
+                <div className="space-y-6">
+                  {isAdmin ? (
+                    <section className="bg-[#151921] rounded-3xl p-8 border border-gray-800 shadow-xl relative overflow-hidden bg-gradient-to-b from-[#1c222d] to-[#151921]">
+                      <div className="absolute top-0 left-0 w-full h-1 bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.5)]"></div>
+                      <h3 className="text-sm font-bold text-white uppercase tracking-widest mb-6 flex items-center gap-2">
+                        <Settings size={18} className="text-amber-500" />
+                        Painel do Administrador (Malakai)
+                      </h3>
+
+                      <div className="space-y-6">
+                        <div>
+                          <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1 mb-2 block">Membro Alvo</label>
+                          <select 
+                            value={selectedDKPPlayerId}
+                            onChange={(e) => setSelectedDKPPlayerId(e.target.value)}
+                            className="w-full bg-[#0b0e14] border border-gray-700 rounded-xl px-4 py-3 text-sm text-gray-200 focus:outline-none focus:border-amber-500"
+                          >
+                            <option value="">Selecionar...</option>
+                            {state.players.map(p => (
+                              <option key={p.id} value={p.id}>{p.name}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1 mb-2 block">Quantidade de Pontos</label>
+                          <input 
+                            type="number"
+                            value={dkpAmount}
+                            onChange={(e) => setDkpAmount(e.target.value)}
+                            className="w-full bg-[#0b0e14] border border-gray-700 rounded-xl px-4 py-3 text-sm text-gray-200 focus:outline-none focus:border-amber-500"
+                            placeholder="Ex: 50"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1 mb-2 block">Motivo</label>
+                          <input 
+                            type="text"
+                            value={dkpReason}
+                            onChange={(e) => setDkpReason(e.target.value)}
+                            className="w-full bg-[#0b0e14] border border-gray-700 rounded-xl px-4 py-3 text-sm text-gray-200 focus:outline-none focus:border-amber-500"
+                            placeholder="Raid Boss, Evento, etc."
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                          <button 
+                            onClick={() => addDKP('add')}
+                            className="bg-amber-500 hover:bg-amber-600 text-black font-black py-4 rounded-xl text-xs uppercase transition-all shadow-lg shadow-amber-500/20"
+                          >
+                            Adicionar DKP
+                          </button>
+                          <button 
+                            onClick={() => addDKP('sub')}
+                            className="bg-gray-800 hover:bg-red-900 border border-red-500/30 text-red-500 hover:text-white font-black py-4 rounded-xl text-xs uppercase transition-all"
+                          >
+                            Retirar DKP
+                          </button>
+                        </div>
+
+                        <div className="pt-4 border-t border-gray-800">
+                          <button 
+                            onClick={() => {
+                              const amount = prompt("Quantidade de DKP para TODOS:");
+                              const reason = prompt("Motivo para TODOS:");
+                              if(amount && reason) handleBulkDKP(parseInt(amount), reason);
+                            }}
+                            className="w-full bg-blue-500/10 hover:bg-blue-500 border border-blue-500/30 text-blue-500 hover:text-white font-black py-3 rounded-xl text-[10px] uppercase transition-all"
+                          >
+                            Bônus Geral (CP Inteira)
+                          </button>
+                        </div>
+                      </div>
+                    </section>
+                  ) : (
+                    <div className="p-8 bg-gray-800/20 border border-gray-800 rounded-3xl text-center space-y-4">
+                      <Lock className="mx-auto text-gray-600" size={32} />
+                      <p className="text-xs text-gray-500 font-medium uppercase tracking-widest">Somente Malakai pode alterar pontos.</p>
+                    </div>
+                  )}
+
+                  <div className="bg-amber-500/5 border border-amber-500/20 rounded-3xl p-6">
+                    <h4 className="text-[10px] font-black text-amber-500 uppercase tracking-widest mb-4 flex items-center gap-2">
+                      <Info size={14} />
+                      Regras Simples
+                    </h4>
+                    <div className="space-y-4">
+                      <div className="flex gap-3">
+                        <div className="w-5 h-5 rounded bg-amber-500 flex items-center justify-center text-black font-bold text-[10px]">1</div>
+                        <p className="text-[10px] text-gray-400 leading-relaxed">Ganhe pontos participando de eventos oficiais e raids.</p>
+                      </div>
+                      <div className="flex gap-3">
+                        <div className="w-5 h-5 rounded bg-amber-500 flex items-center justify-center text-black font-bold text-[10px]">2</div>
+                        <p className="text-[10px] text-gray-400 leading-relaxed">Troque seus pontos por itens no Clan Warehouse.</p>
+                      </div>
+                      <div className="flex gap-3">
+                        <div className="w-5 h-5 rounded bg-amber-500 flex items-center justify-center text-black font-bold text-[10px]">3</div>
+                        <p className="text-[10px] text-gray-400 leading-relaxed">O ranking define quem tem direito de escolha sobre o drop de bosses.</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {activeTab === 'Meu Perfil' && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="max-w-4xl mx-auto space-y-8"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <h1 className="text-3xl font-bold text-white tracking-tight">Meu Perfil</h1>
+                  <p className="text-gray-400 mt-1">Gerencie suas informações pessoais e segurança</p>
+                </div>
+                <div className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 border border-amber-500/20 rounded-full text-amber-500 text-xs font-bold uppercase tracking-widest">
+                  <User size={14} />
+                  Perfil do Membro
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                {/* Profile Photo Section */}
+                <div className="md:col-span-1 space-y-6">
+                  <section className="bg-[#151921] rounded-3xl p-8 border border-gray-800 shadow-xl relative overflow-hidden text-center">
+                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-amber-500 to-orange-500"></div>
+                    
+                    <div className="relative group mx-auto mb-6 w-32 h-32">
+                      <div className="w-full h-full rounded-full bg-[#0b0e14] border-2 border-gray-800 overflow-hidden flex items-center justify-center shadow-2xl group-hover:border-amber-500/50 transition-all">
+                        {state.currentUser?.imageUrl ? (
+                          <img 
+                            src={state.currentUser.imageUrl} 
+                            alt="Profile" 
+                            className="w-full h-full object-cover"
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : (
+                          <User size={48} className="text-gray-700" />
+                        )}
+                      </div>
+                      <label className="absolute bottom-0 right-0 w-10 h-10 bg-amber-500 rounded-full flex items-center justify-center cursor-pointer shadow-lg border-4 border-[#151921] hover:bg-amber-600 transition-colors">
+                        <Camera size={18} className="text-black" />
+                        <input 
+                          type="file" 
+                          className="hidden" 
+                          accept="image/*" 
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file && state.currentUser) updatePlayerImage(state.currentUser.id, file);
+                          }}
+                        />
+                      </label>
+                    </div>
+
+                    <h2 className="text-xl font-bold text-white mb-1">{state.currentUser?.name}</h2>
+                    <p className="text-xs text-gray-500 font-bold uppercase tracking-widest mb-4">Membro da CP</p>
+                    
+                    <div className="pt-4 border-t border-gray-800/50">
+                      <p className="text-[10px] text-gray-500 uppercase font-bold tracking-widest leading-relaxed">
+                        Sua foto de perfil é visível para todos os membros na lista de membros.
+                      </p>
+                    </div>
+                  </section>
+                </div>
+
+                {/* Security Section */}
+                <div className="md:col-span-2 space-y-6">
+                  <section className="bg-[#151921] rounded-3xl p-8 border border-gray-800 shadow-xl relative overflow-hidden">
+                    <div className="flex items-center gap-3 mb-8 text-amber-500">
+                      <Lock size={24} />
+                      <h2 className="text-xl font-bold uppercase tracking-widest">Segurança da Conta</h2>
+                    </div>
+
+                    <div className="space-y-6">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest ml-1">Nova Senha</label>
+                          <div className="relative">
+                            <ShieldCheck className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" size={18} />
+                            <input
+                              type="password"
+                              value={newPassword}
+                              onChange={(e) => setNewPassword(e.target.value)}
+                              className="w-full bg-[#0b0e14] border border-gray-800 rounded-xl py-3 pl-12 pr-4 text-sm focus:outline-none focus:border-amber-500/50 transition-all"
+                              placeholder="Mínimo 6 caracteres"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest ml-1">Confirmar Senha</label>
+                          <div className="relative">
+                            <ShieldCheck className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" size={18} />
+                            <input
+                              type="password"
+                              value={confirmPassword}
+                              onChange={(e) => setConfirmPassword(e.target.value)}
+                              className="w-full bg-[#0b0e14] border border-gray-800 rounded-xl py-3 pl-12 pr-4 text-sm focus:outline-none focus:border-amber-500/50 transition-all"
+                              placeholder="Repita a nova senha"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {passwordMessage && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className={`p-4 rounded-xl border text-sm font-medium text-center ${
+                            passwordMessage.type === 'success' 
+                              ? 'bg-green-500/10 border-green-500/20 text-green-500' 
+                              : 'bg-red-500/10 border-red-500/20 text-red-500'
+                          }`}
+                        >
+                          {passwordMessage.text}
+                        </motion.div>
+                      )}
+
+                      <button
+                        onClick={changePassword}
+                        className="w-full bg-amber-500 hover:bg-amber-600 text-black font-bold py-4 rounded-2xl transition-all shadow-lg shadow-amber-500/20 active:scale-[0.98] flex items-center justify-center gap-2"
+                      >
+                        <Save size={20} />
+                        ATUALIZAR SENHA
+                      </button>
+
+                      <div className="p-4 bg-amber-500/5 border border-amber-500/10 rounded-2xl flex items-start gap-4">
+                        <div className="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-500 shrink-0 mt-1">
+                          <AlertTriangle size={16} />
+                        </div>
+                        <div>
+                          <h4 className="text-[10px] font-bold text-amber-500 uppercase tracking-wider">Dica de Segurança</h4>
+                          <p className="text-[10px] text-gray-400 mt-1 leading-relaxed">
+                            Evite usar senhas óbvias. Sua senha protege seu acesso ao sistema de Craft, Vendas e Histórico da CP.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {activeTab === 'Notificações' && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="max-w-4xl mx-auto space-y-8"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <h1 className="text-3xl font-bold text-white tracking-tight">Notificações</h1>
+                  <p className="text-gray-400 mt-1">Fique por dentro de tudo o que acontece na CP</p>
+                </div>
+                <div className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 border border-amber-500/20 rounded-full text-amber-500 text-xs font-bold uppercase tracking-widest">
+                  <Bell size={14} />
+                  Central de Alertas
+                </div>
+              </div>
+
+              <div className="bg-[#151921] rounded-3xl border border-gray-800 shadow-xl overflow-hidden">
+                <div className="p-6 border-b border-gray-800 flex items-center justify-between bg-gray-800/20">
+                  <h3 className="text-sm font-bold text-white uppercase tracking-widest">Alertas Recentes</h3>
+                  <div className="flex items-center gap-4">
+                    <button 
+                      onClick={() => {
+                        if (!state.currentUser) return;
+                        setState(prev => ({
+                          ...prev,
+                          notifications: (prev.notifications || []).map(n => ({
+                            ...n,
+                            readBy: [...new Set([...n.readBy, state.currentUser!.id])]
+                          }))
+                        }));
+                      }}
+                      className="text-[10px] font-bold text-amber-500 hover:text-amber-400 uppercase tracking-widest transition-colors"
+                    >
+                      Marcar lidas
+                    </button>
+                    {isAdmin && state.notifications.length > 0 && (
+                      <button 
+                        onClick={clearNotifications}
+                        className="text-[10px] font-bold text-red-500 hover:text-red-400 uppercase tracking-widest transition-colors flex items-center gap-1"
+                      >
+                        <Trash2 size={12} />
+                        Limpar Tudo
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="divide-y divide-gray-800">
+                  {(!state.notifications || state.notifications.length === 0) ? (
+                    <div className="p-20 text-center space-y-4">
+                      <div className="w-16 h-16 bg-gray-800/50 rounded-full flex items-center justify-center mx-auto text-gray-600">
+                        <BellOff size={32} />
+                      </div>
+                      <p className="text-gray-500 font-medium">Nenhuma notificação por enquanto.</p>
+                    </div>
+                  ) : (
+                    state.notifications.map((notif) => {
+                      const isRead = notif.readBy.includes(state.currentUser?.id || '');
+                      return (
+                        <motion.div 
+                          key={notif.id}
+                          onClick={() => markNotificationRead(notif.id)}
+                          className={`p-6 flex items-start gap-4 transition-all cursor-pointer hover:bg-amber-500/5 ${isRead ? 'opacity-60' : 'bg-amber-500/[0.02]'}`}
+                        >
+                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                            notif.type === 'siege' ? 'bg-red-500/20 text-red-500' :
+                            notif.type === 'boss' ? 'bg-amber-500/20 text-amber-500' :
+                            'bg-blue-500/20 text-blue-500'
+                          }`}>
+                            {notif.type === 'siege' ? <Castle size={20} /> :
+                             notif.type === 'boss' ? <Skull size={20} /> :
+                             <Info size={20} />}
+                          </div>
+                          <div className="flex-1 space-y-1">
+                            <div className="flex items-center justify-between">
+                              <span className={`text-[10px] font-bold uppercase tracking-widest ${
+                                notif.type === 'siege' ? 'text-red-500' :
+                                notif.type === 'boss' ? 'text-amber-500' :
+                                'text-blue-500'
+                              }`}>
+                                {notif.type === 'siege' ? 'Convocação de Siege' :
+                                 notif.type === 'boss' ? 'Alerta de Boss' :
+                                 'Informação'}
+                              </span>
+                              <span className="text-[10px] text-gray-600 font-medium">
+                                {new Date(notif.timestamp).toLocaleString('pt-BR', { 
+                                  day: '2-digit', 
+                                  month: '2-digit',
+                                  hour: '2-digit',
+                                  minute: '2-digit'
+                                })}
+                              </span>
+                            </div>
+                            <p className={`text-sm ${isRead ? 'text-gray-400' : 'text-gray-200 font-medium'}`}>
+                              {notif.message}
+                            </p>
+                          </div>
+                          {!isRead && (
+                            <div className="w-2 h-2 rounded-full bg-amber-500 mt-2 shadow-[0_0_8px_rgba(245,158,11,0.6)]" />
+                          )}
+                        </motion.div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          )}
+
           {activeTab === 'Admin' && (
             <div className="space-y-8 animate-in fade-in duration-500">
               {!isAdmin ? (
@@ -4388,9 +5298,20 @@ export default function App() {
 
               {/* Lottery History Section */}
               <section className="bg-[#151921] rounded-3xl p-8 border border-gray-800 shadow-xl">
-                <div className="flex items-center gap-3 mb-6 text-amber-500">
-                  <HistoryIcon size={20} />
-                  <h2 className="text-lg font-bold uppercase tracking-wider">Histórico de Sorteio</h2>
+                <div className="flex items-center justify-between mb-8 border-b border-gray-800 pb-6">
+                  <div className="flex items-center gap-3 text-amber-500">
+                    <HistoryIcon size={20} />
+                    <h2 className="text-lg font-bold uppercase tracking-wider">Histórico de Sorteio</h2>
+                  </div>
+                  {isAdmin && state.lotteryHistory.length > 0 && (
+                    <button 
+                      onClick={clearLotteryHistory}
+                      className="bg-red-500/10 hover:bg-red-500/20 text-red-500 px-4 py-2 rounded-xl border border-red-500/30 transition-all font-bold text-xs uppercase flex items-center gap-2 shadow-lg shadow-red-500/10"
+                    >
+                      <Trash2 size={16} />
+                      Limpar Histórico
+                    </button>
+                  )}
                 </div>
 
                 <div className="space-y-4 max-h-[400px] overflow-y-auto custom-scrollbar pr-2">
@@ -4428,7 +5349,7 @@ export default function App() {
                           {isAdmin && (
                             <button 
                               onClick={() => removeLotteryDraw(draw.id)}
-                              className="p-2 text-gray-600 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
+                              className="p-2 bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20 rounded-xl transition-all shadow-sm"
                               title="Excluir Sorteio"
                             >
                               <Trash2 size={16} />
@@ -4511,7 +5432,7 @@ export default function App() {
                       className="w-full bg-[#0b0e14] border border-gray-800 rounded-xl pl-10 pr-4 py-2 text-sm focus:outline-none focus:border-amber-500 transition-colors"
                     />
                   </div>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-2 items-center">
                     {['Todos', ...categories].map(cat => (
                       <button
                         key={cat}
@@ -4525,6 +5446,15 @@ export default function App() {
                         {cat}
                       </button>
                     ))}
+                    {isAdmin && state.warehouseItems.length > 0 && (
+                      <button 
+                        onClick={clearWarehouse}
+                        className="p-1.5 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white border border-red-500/30 rounded-lg transition-all"
+                        title="Limpar Todo o Armazém"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -4598,13 +5528,15 @@ export default function App() {
                               </span>
                             </td>
                             <td className="px-6 py-4 text-right">
-                              <button 
-                                onClick={() => removeWarehouseItem(item.id)}
-                                className="p-2 text-gray-600 hover:text-red-500 transition-colors"
-                                title="Remover do Armazém"
-                              >
-                                <Trash2 size={16} />
-                              </button>
+                              {isAdmin && (
+                                <button 
+                                  onClick={() => removeWarehouseItem(item.id)}
+                                  className="p-2 text-gray-600 hover:text-red-500 transition-colors"
+                                  title="Remover do Armazém"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              )}
                             </td>
                           </tr>
                         ))
@@ -4629,6 +5561,15 @@ export default function App() {
                   </h2>
                   <p className="text-gray-500 font-medium">Agende e confirme presença nas batalhas pelo castelo</p>
                 </div>
+                {isAdmin && state.siegeEvents && state.siegeEvents.length > 0 && (
+                  <button 
+                    onClick={clearSiegeHistory}
+                    className="bg-red-500/10 hover:bg-red-500/20 text-red-500 px-4 py-2 rounded-xl border border-red-500/30 transition-all font-bold text-xs uppercase flex items-center gap-2 shadow-lg shadow-red-500/10"
+                  >
+                    <Trash2 size={16} />
+                    Limpar Tudo
+                  </button>
+                )}
               </header>
 
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -4760,6 +5701,17 @@ export default function App() {
                                   
                                   {event.absences?.[state.currentUser?.id || ''] && (
                                     <span className="text-[10px] font-bold text-red-500 uppercase text-center">Arregou</span>
+                                  )}
+
+                                  {isAdmin && Object.keys(event.attendance).length > 0 && (
+                                    <button 
+                                      onClick={() => awardEventEP(event.id, 'siege')}
+                                      className="px-3 py-1.5 rounded-lg text-[10px] font-bold bg-green-500 text-black hover:bg-green-600 uppercase transition-all flex items-center justify-center gap-1"
+                                      title="Bonificar presentes com 50 EP"
+                                    >
+                                      <Trophy size={10} />
+                                      Bonificar EP
+                                    </button>
                                   )}
                                 </div>
                               </div>
@@ -4988,7 +5940,16 @@ export default function App() {
                   </h2>
                   <p className="text-gray-500 font-medium">Controle de respawn e caçadas</p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 items-center">
+                  {isAdmin && state.bossEvents && state.bossEvents.length > 0 && (
+                    <button 
+                      onClick={clearBossHistory}
+                      className="bg-red-500/10 hover:bg-red-500/20 text-red-500 px-3 py-1.5 rounded-lg border border-red-500/30 transition-all font-bold text-[10px] uppercase flex items-center gap-1.5 mr-2"
+                    >
+                      <Trash2 size={12} />
+                      Limpar Tudo
+                    </button>
+                  )}
                   {isAudioBlocked && isSoundEnabled && (
                     <button 
                       onClick={() => {
@@ -5466,12 +6427,24 @@ export default function App() {
                                       Confirmar
                                     </button>
                                     {isAdmin && (
-                                      <button 
-                                        onClick={() => deleteBossEvent(event.id)}
-                                        className="p-2 text-gray-600 hover:text-red-500 transition-colors"
-                                      >
-                                        <Trash2 size={16} />
-                                      </button>
+                                      <div className="flex gap-2">
+                                        {Object.keys(event.attendance).length > 0 && (
+                                          <button 
+                                            onClick={() => awardEventEP(event.id, 'boss')}
+                                            className="p-2 bg-green-500/10 text-green-500 hover:bg-green-500/20 rounded-xl transition-all"
+                                            title="Bonificar presentes com 50 EP"
+                                          >
+                                            <Trophy size={16} />
+                                          </button>
+                                        )}
+                                        <button 
+                                          onClick={() => deleteBossEvent(event.id)}
+                                          className="p-2 text-gray-600 hover:text-red-500 transition-colors"
+                                          title="Excluir Evento"
+                                        >
+                                          <Trash2 size={16} />
+                                        </button>
+                                      </div>
                                     )}
                                   </div>
                                 </div>
@@ -5504,10 +6477,21 @@ export default function App() {
                 {/* Section: Multas */}
                 <section className="space-y-6">
                   <div className="bg-[#151921] rounded-3xl p-6 border border-gray-800 shadow-xl">
-                    <h3 className="text-sm font-bold text-red-500 uppercase tracking-widest mb-6 flex items-center gap-2">
-                      <AlertTriangle size={16} />
-                      Multas (Arregões)
-                    </h3>
+                    <div className="flex items-center justify-between mb-6">
+                      <h3 className="text-sm font-bold text-red-500 uppercase tracking-widest flex items-center gap-2">
+                        <AlertTriangle size={16} />
+                        Multas (Arregões)
+                      </h3>
+                      {isAdmin && state.fines.length > 0 && (
+                        <button 
+                          onClick={clearFinesHistory}
+                          className="bg-red-500/10 hover:bg-red-500/20 text-red-500 px-3 py-1.5 rounded-xl border border-red-500/30 transition-all font-bold text-[10px] uppercase flex items-center gap-2 shadow-lg shadow-red-500/10"
+                        >
+                          <Trash2 size={12} />
+                          Limpar Histórico
+                        </button>
+                      )}
+                    </div>
                     
                     {isAdmin && (
                       <div className="grid grid-cols-1 md:grid-cols-12 gap-4 mb-8 bg-gray-800/20 p-4 rounded-2xl border border-gray-800/50">
@@ -5584,7 +6568,8 @@ export default function App() {
                               {isAdmin && (
                                 <button 
                                   onClick={() => removeFine(fine.id)}
-                                  className="p-2 text-gray-600 hover:text-red-500 transition-colors"
+                                  className="p-2 bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20 rounded-xl transition-all shadow-sm"
+                                  title="Excluir Multa"
                                 >
                                   <Trash2 size={16} />
                                 </button>
@@ -5600,10 +6585,21 @@ export default function App() {
                 {/* Section: Tributos */}
                 <section className="space-y-6">
                   <div className="bg-[#151921] rounded-3xl p-6 border border-gray-800 shadow-xl">
-                    <h3 className="text-sm font-bold text-amber-500 uppercase tracking-widest mb-6 flex items-center gap-2">
-                      <DollarSign size={16} />
-                      Tributos (Mensalidades)
-                    </h3>
+                    <div className="flex items-center justify-between mb-6">
+                      <h3 className="text-sm font-bold text-amber-500 uppercase tracking-widest flex items-center gap-2">
+                        <DollarSign size={16} />
+                        Tributos (Mensalidades)
+                      </h3>
+                      {isAdmin && state.tributes.length > 0 && (
+                        <button 
+                          onClick={clearTributesHistory}
+                          className="bg-red-500/10 hover:bg-red-500/20 text-red-500 px-3 py-1.5 rounded-xl border border-red-500/30 transition-all font-bold text-[10px] uppercase flex items-center gap-2 shadow-lg shadow-red-500/10"
+                        >
+                          <Trash2 size={12} />
+                          Limpar Histórico
+                        </button>
+                      )}
+                    </div>
 
                     {isAdmin && (
                       <div className="grid grid-cols-1 md:grid-cols-12 gap-4 mb-8 bg-gray-800/20 p-4 rounded-2xl border border-gray-800/50">
@@ -5690,7 +6686,8 @@ export default function App() {
                               {isAdmin && (
                                 <button 
                                   onClick={() => removeTribute(tribute.id)}
-                                  className="p-2 text-gray-600 hover:text-red-500 transition-colors"
+                                  className="p-2 bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20 rounded-xl transition-all shadow-sm"
+                                  title="Excluir Tributo"
                                 >
                                   <Trash2 size={16} />
                                 </button>
@@ -5705,7 +6702,7 @@ export default function App() {
               </div>
             </motion.div>
           )}
-          {activeTab !== 'Craft-CP' && activeTab !== 'Vendas' && activeTab !== 'Histórico' && activeTab !== 'Itens' && activeTab !== 'Membros' && activeTab !== 'Admin' && activeTab !== 'Loteria Furia' && activeTab !== 'Cla Warehouse' && activeTab !== 'Siege' && activeTab !== 'Boss' && activeTab !== 'Tributos e Multas' && (
+          {activeTab !== 'Craft-CP' && activeTab !== 'Vendas' && activeTab !== 'Histórico' && activeTab !== 'Itens' && activeTab !== 'Membros' && activeTab !== 'DKP' && activeTab !== 'Meu Perfil' && activeTab !== 'Admin' && activeTab !== 'Loteria Furia' && activeTab !== 'Cla Warehouse' && activeTab !== 'Siege' && activeTab !== 'Boss' && activeTab !== 'Tributos e Multas' && (
             <div className="flex flex-col items-center justify-center h-full text-gray-500 space-y-4">
               <div className="w-20 h-20 bg-gray-800/50 rounded-full flex items-center justify-center">
                 <LayoutDashboard size={40} />
